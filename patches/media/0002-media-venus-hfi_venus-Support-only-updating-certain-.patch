@@ -1,4 +1,4 @@
-From 5b5267596ed25465940c57babed6753e68e85b39 Mon Sep 17 00:00:00 2001
+From a8a4d4db41f1f6049cc68d63915ebd45ceaffec4 Mon Sep 17 00:00:00 2001
 From: Konrad Dybcio <konrad.dybcio@linaro.org>
 Date: Fri, 4 Aug 2023 22:09:10 +0200
 Subject: [PATCH 2/6] media: venus: hfi_venus: Support only updating certain
@@ -17,7 +17,7 @@ Signed-off-by: Johan Hovold <johan+linaro@kernel.org>
  2 files changed, 13 insertions(+), 3 deletions(-)
 
 diff --git a/drivers/media/platform/qcom/venus/core.h b/drivers/media/platform/qcom/venus/core.h
-index 7506f5d0f..f680c7404 100644
+index 46705a666..fa6736ee6 100644
 --- a/drivers/media/platform/qcom/venus/core.h
 +++ b/drivers/media/platform/qcom/venus/core.h
 @@ -40,6 +40,7 @@ struct freq_tbl {
@@ -55,6 +55,3 @@ index bd82066bb..9f76a4fe5 100644
  }
  
  static void venus_soft_int(struct venus_hfi_device *hdev)
--- 
-2.52.0
-
