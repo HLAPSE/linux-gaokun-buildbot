@@ -216,6 +216,16 @@ Pin: origin packages.mozilla.org
 Pin-Priority: 1000
 EOF
 
+# 系统源切换到清华 TUNA 中国镜像（aarch64 使用 ubuntu-ports），加快国内装机速度
+if ls /etc/apt/sources.list.d/*.sources >/dev/null 2>&1; then
+    sed -i 's#http://ports.ubuntu.com/ubuntu-ports#https://mirrors.tuna.tsinghua.edu.cn/ubuntu-ports#g' \
+        /etc/apt/sources.list.d/*.sources
+    sed -i 's#http://archive.ubuntu.com/ubuntu#https://mirrors.tuna.tsinghua.edu.cn/ubuntu#g' \
+        /etc/apt/sources.list.d/*.sources
+fi
+sed -i 's#http://ports.ubuntu.com/ubuntu-ports#https://mirrors.tuna.tsinghua.edu.cn/ubuntu-ports#g' \
+    /etc/apt/sources.list 2>/dev/null || true
+
 apt-get update
 
 # 安装桌面环境与常用软件

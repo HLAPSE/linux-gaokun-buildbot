@@ -157,8 +157,11 @@ LC_MESSAGES=zh_CN.UTF-8
 EOF
 
 # 第二步再安装桌面环境和应用，能更稳定地把中文翻译子包一起拉进 rootfs
+# 通过 --setopt 把本次安装的核心 repo 切到清华 TUNA 中国镜像，不改动宿主机自身的源
 sudo dnf --installroot=$ROOTFS_DIR --releasever=44 --forcearch=aarch64 --use-host-config -y \
     --exclude=gnome-boxes,gnome-connections,snapshot,gnome-weather,gnome-contacts,gnome-maps,simple-scan,gnome-clocks,gnome-calculator,gnome-calendar,amd-gpu-firmware,intel-gpu-firmware,linux-firmware,nvidia-gpu-firmware,toolbox,unoconv,mediawriter \
+    --setopt='fedora.baseurl=https://mirrors.tuna.tsinghua.edu.cn/fedora/releases/$releasever/Everything/$basearch/os/' \
+    --setopt='updates.baseurl=https://mirrors.tuna.tsinghua.edu.cn/fedora/updates/$releasever/Everything/$basearch/' \
     install \
     @gnome-desktop @workstation-product \
     fcitx5-chinese-addons google-noto-sans-cjk-fonts gnome-tweaks gnome-extensions-app telnet mpv v4l-utils vim nano ripgrep git htop fastfetch screen firefox

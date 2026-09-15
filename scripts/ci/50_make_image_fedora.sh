@@ -129,6 +129,12 @@ application/x-rpm=$RPM_HANDLER
 EOF
 fi
 
+# 时区：中国区默认 Asia/Shanghai（chroot 内 timedatectl 不可用，用符号链接 + tz 文件）
+ln -sf /usr/share/zoneinfo/Asia/Shanghai /etc/localtime
+cat > /etc/timezone <<'EOF'
+Asia/Shanghai
+EOF
+
 cat > /etc/dracut.conf.d/matebook.conf <<'MODEOF'
 hostonly="no"
 add_drivers+=" btrfs nvme phy-qcom-qmp-pcie phy-qcom-qmp-combo phy-qcom-qmp-usb phy-qcom-snps-femto-v2 usb-storage uas typec pci-pwrctrl-pwrseq ath11k ath11k_pci i2c-hid-of "

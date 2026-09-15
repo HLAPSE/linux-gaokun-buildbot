@@ -137,6 +137,12 @@ application/vnd.debian.binary-package=$DEB_HANDLER
 EOF
 fi
 
+# 时区：中国区默认 Asia/Shanghai（chroot 内 timedatectl 不可用，用符号链接 + tz 文件）
+ln -sf /usr/share/zoneinfo/Asia/Shanghai /etc/localtime
+cat > /etc/timezone <<'EOF'
+Asia/Shanghai
+EOF
+
 cat >> /etc/initramfs-tools/modules <<'MODEOF'
 # Storage and USB
 nvme

@@ -201,6 +201,19 @@ jobs:
               echo "%_install_langs all" > /etc/rpm/macros.image-language-conf
               sed -i "/tsflags=nodocs/d" /etc/dnf/dnf.conf
 
+              # 将核心 repo 的 metalink/mirrorlist 换成清华 TUNA 中国镜像，加快国内装机速度
+              for repo_path in /etc/yum.repos.d/fedora.repo /etc/yum.repos.d/fedora-updates.repo; do
+                [ -f "$repo_path" ] || continue
+                case "$repo_path" in
+                  *updates*)
+                    repo_baseurl="https://mirrors.tuna.tsinghua.edu.cn/fedora/updates/\$releasever/Everything/\$basearch/";;
+                  *)
+                    repo_baseurl="https://mirrors.tuna.tsinghua.edu.cn/fedora/releases/\$releasever/Everything/\$basearch/os/";;
+                esac
+                sed -i "s#^metalink=.*#baseurl=$repo_baseurl#" "$repo_path"
+                sed -i "s#^mirrorlist=.*#baseurl=$repo_baseurl#" "$repo_path"
+              done
+
               mkdir -p "'"$ROOTFS_DIR"'/etc"
 
               dnf -y --installroot="'"$ROOTFS_DIR"'" --releasever="'"$FEDORA_RELEASE"'" --forcearch=aarch64 --use-host-config \

@@ -227,6 +227,16 @@ jobs:
           sudo chroot "$ROOTFS_DIR" /usr/bin/env UBUNTU_RELEASE="$UBUNTU_RELEASE" /bin/bash -euxo pipefail -c '
             export DEBIAN_FRONTEND=noninteractive
 
+            # 系统源切换到清华 TUNA 中国镜像（aarch64 使用 ubuntu-ports）
+            if ls /etc/apt/sources.list.d/*.sources >/dev/null 2>&1; then
+              sed -i 's#http://ports.ubuntu.com/ubuntu-ports#https://mirrors.tuna.tsinghua.edu.cn/ubuntu-ports#g' \
+                /etc/apt/sources.list.d/*.sources
+              sed -i 's#http://archive.ubuntu.com/ubuntu#https://mirrors.tuna.tsinghua.edu.cn/ubuntu#g' \
+                /etc/apt/sources.list.d/*.sources
+            fi
+            sed -i 's#http://ports.ubuntu.com/ubuntu-ports#https://mirrors.tuna.tsinghua.edu.cn/ubuntu-ports#g' \
+              /etc/apt/sources.list 2>/dev/null || true
+
             apt-get update
             apt-get install -y locales
             sed -i "s/# zh_CN.UTF-8/zh_CN.UTF-8/" /etc/locale.gen
