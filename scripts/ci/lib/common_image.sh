@@ -25,6 +25,8 @@ install_common_image_assets() {
   sudo mkdir -p \
     "$rootfs_dir/etc/modules-load.d" \
     "$rootfs_dir/etc/modprobe.d" \
+    "$rootfs_dir/etc/profile.d" \
+    "$rootfs_dir/etc/xdg/autostart" \
     "$rootfs_dir/etc/udev/rules.d" \
     "$rootfs_dir/etc/systemd/system" \
     "$rootfs_dir/etc/gaokun" \
@@ -38,6 +40,10 @@ install_common_image_assets() {
     "$rootfs_dir/etc/modules-load.d/"
   sudo cp -a "$gaokun_dir/tools/image-assets/etc/modprobe.d/." \
     "$rootfs_dir/etc/modprobe.d/"
+  sudo cp -a "$gaokun_dir/tools/image-assets/etc/profile.d/." \
+    "$rootfs_dir/etc/profile.d/"
+  sudo cp -a "$gaokun_dir/tools/image-assets/etc/xdg/autostart/." \
+    "$rootfs_dir/etc/xdg/autostart/"
 
   for asset in "${executable_assets[@]}"; do
     src="${asset%%:*}"

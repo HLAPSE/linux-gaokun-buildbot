@@ -1,0 +1,11 @@
+[Desktop Entry]
+Name=fcitx5
+GenericName=Input Method
+Comment=Start fcitx5 input method
+Exec=fcitx5 --replace -d
+Icon=fcitx
+Terminal=false
+Type=Application
+Categories=System;InputMethod;
+X-GNOME-Autostart-enabled=true
+StartupNotify=false
