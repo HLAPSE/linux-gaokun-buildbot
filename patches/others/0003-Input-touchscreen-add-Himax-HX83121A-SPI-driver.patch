@@ -74,7 +74,7 @@ new file mode 100644
 index 000000000..6b82c818d
 --- /dev/null
 +++ b/drivers/input/touchscreen/himax-spi-core.c
-@@ -0,0 +1,1478 @@
+@@ -0,0 +1,1488 @@
 +// SPDX-License-Identifier: GPL-2.0
 +/*
 + * Himax SPI Driver
