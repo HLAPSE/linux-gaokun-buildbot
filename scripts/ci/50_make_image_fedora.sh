@@ -108,6 +108,9 @@ chown -R user:user /home/user
 systemctl enable gdm NetworkManager sshd \
   gdm-monitor-sync.service patch-nvm-bdaddr.service || true
 
+# 编译 system-db:local（screen-keyboard-enabled 等镜像默认值）进 dconf 数据库
+dconf update || true
+
 cat > /etc/dracut.conf.d/matebook.conf <<'MODEOF'
 hostonly="no"
 add_drivers+=" btrfs nvme phy-qcom-qmp-pcie phy-qcom-qmp-combo phy-qcom-qmp-usb phy-qcom-snps-femto-v2 usb-storage uas typec pci-pwrctrl-pwrseq ath11k ath11k_pci i2c-hid-of "

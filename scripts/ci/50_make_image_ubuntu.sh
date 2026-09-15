@@ -116,6 +116,9 @@ systemctl enable gdm NetworkManager ssh \
   gaokun-fix-x11-unix.service gdm-monitor-sync.service \
   patch-nvm-bdaddr.service || true
 
+# 编译 system-db:local（screen-keyboard-enabled 等镜像默认值）进 dconf 数据库
+dconf update || true
+
 cat >> /etc/initramfs-tools/modules <<'MODEOF'
 # Storage and USB
 nvme
