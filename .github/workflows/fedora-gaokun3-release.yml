@@ -22,7 +22,7 @@ on:
       extra_packages:
         description: Extra packages to install (space-separated)
         required: true
-        default: "fcitx5-chinese-addons gnome-tweaks gnome-extensions-app telnet mpv v4l-utils vim nano ripgrep git htop fastfetch screen firefox"
+        default: "fcitx5-chinese-addons fcitx5-gtk3 fcitx5-gtk4 fcitx5-qt5 fcitx5-qt6 gnome-tweaks gnome-extensions-app telnet mpv v4l-utils vim nano ripgrep git htop fastfetch screen firefox"
       build_el2:
         description: Build and include optional -gaokun3-el2 kernel and EL2 EFI payloads
         required: true
@@ -201,8 +201,22 @@ jobs:
               echo "%_install_langs all" > /etc/rpm/macros.image-language-conf
               sed -i "/tsflags=nodocs/d" /etc/dnf/dnf.conf
 
+              # 将核心 repo 的 metalink/mirrorlist 换成清华 TUNA 中国镜像，加快国内装机速度
+              for repo_path in /etc/yum.repos.d/fedora.repo /etc/yum.repos.d/fedora-updates.repo; do
+                [ -f "$repo_path" ] || continue
+                case "$repo_path" in
+                  *updates*)
+                    repo_baseurl="https://mirrors.tuna.tsinghua.edu.cn/fedora/updates/\$releasever/Everything/\$basearch/";;
+                  *)
+                    repo_baseurl="https://mirrors.tuna.tsinghua.edu.cn/fedora/releases/\$releasever/Everything/\$basearch/os/";;
+                esac
+                sed -i "s#^metalink=.*#baseurl=$repo_baseurl#" "$repo_path"
+                sed -i "s#^mirrorlist=.*#baseurl=$repo_baseurl#" "$repo_path"
+              done
+
               mkdir -p "'"$ROOTFS_DIR"'/etc"
 
+              # dconf 供后续镜像配置步骤使用（dconf update 把屏幕键盘等默认值写入数据库）
               dnf -y --installroot="'"$ROOTFS_DIR"'" --releasever="'"$FEDORA_RELEASE"'" --forcearch=aarch64 --use-host-config \
                 --exclude="'"$EXCLUDED_PACKAGES"'" \
                 install \
@@ -210,7 +224,7 @@ jobs:
                 systemd-boot-unsigned alsa-ucm \
                 langpacks-en langpacks-zh_CN \
                 google-noto-color-emoji-fonts google-noto-emoji-fonts \
-                alsa-utils pipewire-utils \
+                alsa-utils pipewire-utils dconf \
                 '"$EXTRA_PACKAGES"'
 
               dnf -y --installroot="'"$ROOTFS_DIR"'" --releasever="'"$FEDORA_RELEASE"'" --forcearch=aarch64 --use-host-config \

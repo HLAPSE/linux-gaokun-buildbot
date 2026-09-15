@@ -18,7 +18,7 @@ on:
       extra_packages:
         description: Extra packages to install (space-separated)
         required: true
-        default: "language-pack-gnome-zh-hans fcitx5-chinese-addons gnome-tweaks gnome-shell-extension-manager mpv v4l-utils vim nano ripgrep git htop rsync mutter screen firefox"
+        default: "language-pack-gnome-zh-hans fcitx5-chinese-addons fcitx5-frontend-gtk3 fcitx5-frontend-gtk4 fcitx5-frontend-qt5 fcitx5-frontend-qt6 gdebi gnome-tweaks gnome-shell-extension-manager mpv v4l-utils vim nano ripgrep git htop rsync mutter screen firefox"
       build_el2:
         description: Build and include optional -gaokun3-el2 kernel and EL2 EFI payloads
         required: true
@@ -227,6 +227,17 @@ jobs:
           sudo chroot "$ROOTFS_DIR" /usr/bin/env UBUNTU_RELEASE="$UBUNTU_RELEASE" /bin/bash -euxo pipefail -c '
             export DEBIAN_FRONTEND=noninteractive
 
+            # 系统源切换到清华 TUNA 中国镜像（aarch64 使用 ubuntu-ports）
+            # 按 host 匹配、同时覆盖 http/https；arm64 只用 ports.ubuntu.com，不要映射到 x86 的 /ubuntu 仓库
+            if ls /etc/apt/sources.list.d/*.sources >/dev/null 2>&1; then
+              sed -i 's#http://ports.ubuntu.com/ubuntu-ports#https://mirrors.tuna.tsinghua.edu.cn/ubuntu-ports#g' \
+                -e 's#https://ports.ubuntu.com/ubuntu-ports#https://mirrors.tuna.tsinghua.edu.cn/ubuntu-ports#g' \
+                /etc/apt/sources.list.d/*.sources
+            fi
+            sed -i 's#http://ports.ubuntu.com/ubuntu-ports#https://mirrors.tuna.tsinghua.edu.cn/ubuntu-ports#g' \
+              -e 's#https://ports.ubuntu.com/ubuntu-ports#https://mirrors.tuna.tsinghua.edu.cn/ubuntu-ports#g' \
+              /etc/apt/sources.list 2>/dev/null || true
+
             apt-get update
             apt-get install -y locales
             sed -i "s/# zh_CN.UTF-8/zh_CN.UTF-8/" /etc/locale.gen
@@ -245,6 +256,9 @@ jobs:
               xz-utils unzip zip bzip2 zstd p7zip-full \
               wget curl ca-certificates gnupg lsb-release \
               ssh less file sudo
+
+            # dconf-cli: required by the image configuration step (dconf update writes screen-keyboard defaults)
+            apt-get install -y dconf-cli
 
             install -d -m 0755 /etc/apt/keyrings
             wget -qO- https://packages.mozilla.org/apt/repo-signing-key.gpg | \

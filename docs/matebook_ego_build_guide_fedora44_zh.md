@@ -157,11 +157,16 @@ LC_MESSAGES=zh_CN.UTF-8
 EOF
 
 # 第二步再安装桌面环境和应用，能更稳定地把中文翻译子包一起拉进 rootfs
+# 通过 --setopt 把本次安装的核心 repo 切到清华 TUNA 中国镜像，不改动宿主机自身的源
 sudo dnf --installroot=$ROOTFS_DIR --releasever=44 --forcearch=aarch64 --use-host-config -y \
     --exclude=gnome-boxes,gnome-connections,snapshot,gnome-weather,gnome-contacts,gnome-maps,simple-scan,gnome-clocks,gnome-calculator,gnome-calendar,amd-gpu-firmware,intel-gpu-firmware,linux-firmware,nvidia-gpu-firmware,toolbox,unoconv,mediawriter \
+    --setopt='fedora.baseurl=https://mirrors.tuna.tsinghua.edu.cn/fedora/releases/$releasever/Everything/$basearch/os/' \
+    --setopt='updates.baseurl=https://mirrors.tuna.tsinghua.edu.cn/fedora/updates/$releasever/Everything/$basearch/' \
     install \
     @gnome-desktop @workstation-product \
-    fcitx5-chinese-addons gnome-tweaks gnome-extensions-app telnet mpv v4l-utils vim nano ripgrep git htop fastfetch screen firefox
+    fcitx5-chinese-addons fcitx5-gtk3 fcitx5-gtk4 fcitx5-qt5 fcitx5-qt6 \
+    dconf \
+    google-noto-sans-cjk-fonts gnome-tweaks gnome-extensions-app telnet mpv v4l-utils vim nano ripgrep git htop fastfetch screen firefox
 
 # 安装 RPMFusion 并添加 libavcodec-freeworld（硬解视频编码支持）
 sudo dnf --installroot=$ROOTFS_DIR --releasever=44 --forcearch=aarch64 --use-host-config -y \
@@ -175,6 +180,20 @@ sudo dnf --installroot=$ROOTFS_DIR --releasever=44 --forcearch=aarch64 --use-hos
     --setopt=reposdir="$ROOTFS_DIR/etc/yum.repos.d,/etc/yum.repos.d" \
     install \
     libavcodec-freeworld
+
+# --setopt 只影响当次安装、不落盘；把 rootfs 内的核心 repo 也固定到清华 TUNA，
+# 装机后的 dnf 同样走国内镜像（metalink/mirrorlist 换成 TUNA baseurl）
+for repo_path in $ROOTFS_DIR/etc/yum.repos.d/fedora.repo $ROOTFS_DIR/etc/yum.repos.d/fedora-updates.repo; do
+    [ -f "$repo_path" ] || continue
+    case "$repo_path" in
+        *updates*)
+            repo_baseurl='https://mirrors.tuna.tsinghua.edu.cn/fedora/updates/$releasever/Everything/$basearch/' ;;
+        *)
+            repo_baseurl='https://mirrors.tuna.tsinghua.edu.cn/fedora/releases/$releasever/Everything/$basearch/os/' ;;
+    esac
+    sudo sed -i "s#^metalink=.*#baseurl=$repo_baseurl#" "$repo_path"
+    sudo sed -i "s#^mirrorlist=.*#baseurl=$repo_baseurl#" "$repo_path"
+done
 ```
 
 安装内核、模块、固件和本地工具：
@@ -435,6 +454,25 @@ exit
 - Fedora 44 的 `90-loaderentry.install` 会从 `/usr/lib/modules/<kernel-release>/dtb/` 查找设备树，所以 DTB 必须放到这个标准路径里。
 - Fedora 默认的 `51-dracut-rescue.install` 会额外生成 `0-rescue` 启动项，但这个救援项默认不带 `devicetree`，在 gaokun3 上不可用，因此这里显式将其禁用。
 
+### 中文输入法（fcitx5）预设
+
+本镜像针对「纯触屏输入中文」这一场景，内置了 fcitx5 输入法相关的默认配置，均为用户态，不涉及内核，与 Ubuntu 构建通用：
+
+- **CJK 字体**：安装 `google-noto-sans-cjk-fonts`，保证中文候选/界面不出现方框方块。
+- **输入法环境变量**：`/etc/profile.d/fcitx5.sh` 写入 `XMODIFIERS=@im=fcitx`、`GTK_IM_MODULE=fcitx`、`QT_IM_MODULE=fcitx`（已有值时尊重用户配置）。
+- **开机自启**：`/etc/xdg/autostart/fcitx5.desktop` 让 fcitx5 随桌面一起启动。
+- **默认拼音**：`/etc/xdg/fcitx5/profile` 让新用户默认即启用「美式键盘 + 拼音」。
+- **屏幕键盘**：`/etc/dconf/db/local.d/00-screen-keyboard` 设 `screen-keyboard-enabled=true`，桌面会话下屏幕键盘默认开启。
+
+手动构建时，把上述 4 个小文件按路径放进 `$ROOTFS_DIR`，并在「第 4 步 chroot 初始化」末尾补一行使其生效：
+
+```bash
+# dconf 已包含在第三步的包清单中；若提示 command not found，说明漏装了
+dconf update
+```
+
+> 候选面板的字号/每页个数属于 fcitx5 外观主题（依赖已安装的主题），默认不强改。若触屏点候选偏小，首启后在「fcitx5 设置 → 外观」里调大字号、减少每页候选数。
+
 ### 触屏驱动鸣谢
 
 - [chiyuki0325/EGoTouchRev-Linux](https://github.com/chiyuki0325/EGoTouchRev-Linux)：本仓库直接集成的 `himax_hx83121a_spi` 触屏驱动与调参算法的主要上游来源。
@@ -455,3 +493,4 @@ sudo losetup -d $LOOP
 - 双系统覆盖 EFI 的方式请参考 [dual_boot_guide_zh.md](dual_boot_guide_zh.md)
 - 如果在本指南中同时构建了 `-gaokun3-el2` 内核变体，产出的镜像就已经具备 EL2 支持。
 - 有关实现细节、启动链结构和排障说明，请参考 [el2_kvm_guide_zh.md](el2_kvm_guide_zh.md)
+- CI 流水线产出的镜像默认带 `user` 账号（密码同为 `user`，且免密 sudo），首次启动后请尽快执行 `passwd` 修改密码。
