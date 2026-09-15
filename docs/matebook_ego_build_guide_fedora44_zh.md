@@ -164,7 +164,9 @@ sudo dnf --installroot=$ROOTFS_DIR --releasever=44 --forcearch=aarch64 --use-hos
     --setopt='updates.baseurl=https://mirrors.tuna.tsinghua.edu.cn/fedora/updates/$releasever/Everything/$basearch/' \
     install \
     @gnome-desktop @workstation-product \
-    fcitx5-chinese-addons google-noto-sans-cjk-fonts gnome-tweaks gnome-extensions-app telnet mpv v4l-utils vim nano ripgrep git htop fastfetch screen firefox
+    fcitx5-chinese-addons fcitx5-gtk3 fcitx5-gtk4 fcitx5-qt5 fcitx5-qt6 \
+    dconf \
+    google-noto-sans-cjk-fonts gnome-tweaks gnome-extensions-app telnet mpv v4l-utils vim nano ripgrep git htop fastfetch screen firefox
 
 # 安装 RPMFusion 并添加 libavcodec-freeworld（硬解视频编码支持）
 sudo dnf --installroot=$ROOTFS_DIR --releasever=44 --forcearch=aarch64 --use-host-config -y \
@@ -178,6 +180,20 @@ sudo dnf --installroot=$ROOTFS_DIR --releasever=44 --forcearch=aarch64 --use-hos
     --setopt=reposdir="$ROOTFS_DIR/etc/yum.repos.d,/etc/yum.repos.d" \
     install \
     libavcodec-freeworld
+
+# --setopt 只影响当次安装、不落盘；把 rootfs 内的核心 repo 也固定到清华 TUNA，
+# 装机后的 dnf 同样走国内镜像（metalink/mirrorlist 换成 TUNA baseurl）
+for repo_path in $ROOTFS_DIR/etc/yum.repos.d/fedora.repo $ROOTFS_DIR/etc/yum.repos.d/fedora-updates.repo; do
+    [ -f "$repo_path" ] || continue
+    case "$repo_path" in
+        *updates*)
+            repo_baseurl='https://mirrors.tuna.tsinghua.edu.cn/fedora/updates/$releasever/Everything/$basearch/' ;;
+        *)
+            repo_baseurl='https://mirrors.tuna.tsinghua.edu.cn/fedora/releases/$releasever/Everything/$basearch/os/' ;;
+    esac
+    sudo sed -i "s#^metalink=.*#baseurl=$repo_baseurl#" "$repo_path"
+    sudo sed -i "s#^mirrorlist=.*#baseurl=$repo_baseurl#" "$repo_path"
+done
 ```
 
 安装内核、模块、固件和本地工具：
@@ -451,7 +467,8 @@ exit
 手动构建时，把上述 4 个小文件按路径放进 `$ROOTFS_DIR`，并在「第 4 步 chroot 初始化」末尾补一行使其生效：
 
 ```bash
-dconf update || true
+# dconf 已包含在第三步的包清单中；若提示 command not found，说明漏装了
+dconf update
 ```
 
 > 候选面板的字号/每页个数属于 fcitx5 外观主题（依赖已安装的主题），默认不强改。若触屏点候选偏小，首启后在「fcitx5 设置 → 外观」里调大字号、减少每页候选数。
@@ -476,3 +493,4 @@ sudo losetup -d $LOOP
 - 双系统覆盖 EFI 的方式请参考 [dual_boot_guide_zh.md](dual_boot_guide_zh.md)
 - 如果在本指南中同时构建了 `-gaokun3-el2` 内核变体，产出的镜像就已经具备 EL2 支持。
 - 有关实现细节、启动链结构和排障说明，请参考 [el2_kvm_guide_zh.md](el2_kvm_guide_zh.md)
+- CI 流水线产出的镜像默认带 `user` 账号（密码同为 `user`，且免密 sudo），首次启动后请尽快执行 `passwd` 修改密码。

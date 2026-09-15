@@ -109,31 +109,62 @@ systemctl enable gdm NetworkManager sshd \
   gdm-monitor-sync.service patch-nvm-bdaddr.service || true
 
 # 编译 system-db:local（screen-keyboard-enabled 等镜像默认值）进 dconf 数据库
-dconf update || true
+# dconf 由 dconf 包提供（构建时已显式安装）；缺失直接失败，避免屏幕键盘等默认值静默丢失
+command -v dconf >/dev/null 2>&1 || { echo "ERROR: dconf not available in chroot (install dconf)" >&2; exit 1; }
+dconf update
+
+# 若构建时未安装 fcitx5（如清空了 extra_packages），同步移除自启动项与输入法预设，避免留下失效配置
+if ! command -v fcitx5 >/dev/null 2>&1; then
+  rm -f /etc/xdg/autostart/fcitx5.desktop /etc/xdg/fcitx5/profile /etc/profile.d/fcitx5.sh
+fi
 
 # 让双击 .rpm 通过 GNOME Software 弹安装界面：
-# 找到声明 application/x-rpm 的 desktop（gnome-software 提供，内置本地 rpm 安装），
-# 写入全局 /etc/xdg/mimeapps.list，作为 Nautilus 默认打开方式。
+# 优先白名单（gnome-software），找不到再按 MIME 声明回退搜索，
+# 写入全局 /etc/xdg/mimeapps.list 作为 Nautilus 默认打开方式（文件已存在时追加，不整体覆盖）。
 RPM_HANDLER=""
-for _f in /usr/share/applications/*.desktop; do
-  if grep -qs 'application/x-rpm' "$_f" 2>/dev/null; then
-    RPM_HANDLER="$(basename "$_f")"
+for _f in org.gnome.Software.desktop; do
+  if [[ -f "/usr/share/applications/$_f" ]]; then
+    RPM_HANDLER="$_f"
     break
   fi
 done
+if [[ -z "$RPM_HANDLER" ]]; then
+  for _f in /usr/share/applications/*.desktop; do
+    if grep -qs 'application/x-rpm' "$_f" 2>/dev/null; then
+      RPM_HANDLER="$(basename "$_f")"
+      break
+    fi
+  done
+fi
 if [[ -n "$RPM_HANDLER" ]]; then
+  MIMEAPPS=/etc/xdg/mimeapps.list
   install -d -m 0755 /etc/xdg
-  cat > /etc/xdg/mimeapps.list <<EOF
-[Default Applications]
-application/x-rpm=$RPM_HANDLER
-EOF
+  if [[ ! -f "$MIMEAPPS" ]]; then
+    printf '[Default Applications]\napplication/x-rpm=%s\n' "$RPM_HANDLER" > "$MIMEAPPS"
+  elif grep -qs '^application/x-rpm=' "$MIMEAPPS"; then
+    sed -i "s#^application/x-rpm=.*#application/x-rpm=$RPM_HANDLER#" "$MIMEAPPS"
+  elif grep -qs '^\[Default Applications\]' "$MIMEAPPS"; then
+    sed -i "/^\[Default Applications\]/a application/x-rpm=$RPM_HANDLER" "$MIMEAPPS"
+  else
+    printf '[Default Applications]\napplication/x-rpm=%s\n' "$RPM_HANDLER" >> "$MIMEAPPS"
+  fi
 fi
 
-# 时区：中国区默认 Asia/Shanghai（chroot 内 timedatectl 不可用，用符号链接 + tz 文件）
+# 时区：中国区默认 Asia/Shanghai（chroot 内 timedatectl 不可用，用符号链接；
+# /etc/timezone 是 Debian 系专属文件，Fedora 不读取，无需写入）
 ln -sf /usr/share/zoneinfo/Asia/Shanghai /etc/localtime
-cat > /etc/timezone <<'EOF'
-Asia/Shanghai
-EOF
+
+# 装机后的系统源也固定到清华 TUNA：bootstrap 阶段只加速了构建容器本身，
+# rootfs 内 repo 文件仍是官方 metalink；此处把 metalink/mirrorlist 换成 TUNA baseurl 落盘
+for _repo in /etc/yum.repos.d/fedora.repo /etc/yum.repos.d/fedora-updates.repo; do
+  [ -f "$_repo" ] || continue
+  case "$_repo" in
+    *updates*) _baseurl='https://mirrors.tuna.tsinghua.edu.cn/fedora/updates/$releasever/Everything/$basearch/' ;;
+    *)         _baseurl='https://mirrors.tuna.tsinghua.edu.cn/fedora/releases/$releasever/Everything/$basearch/os/' ;;
+  esac
+  sed -i "s#^metalink=.*#baseurl=$_baseurl#" "$_repo"
+  sed -i "s#^mirrorlist=.*#baseurl=$_baseurl#" "$_repo"
+done
 
 cat > /etc/dracut.conf.d/matebook.conf <<'MODEOF'
 hostonly="no"

@@ -117,24 +117,45 @@ systemctl enable gdm NetworkManager ssh \
   patch-nvm-bdaddr.service || true
 
 # 编译 system-db:local（screen-keyboard-enabled 等镜像默认值）进 dconf 数据库
-dconf update || true
+# dconf 由 dconf-cli 提供（构建时已显式安装）；缺失直接失败，避免屏幕键盘等默认值静默丢失
+command -v dconf >/dev/null 2>&1 || { echo "ERROR: dconf not available in chroot (install dconf-cli)" >&2; exit 1; }
+dconf update
+
+# 若构建时未安装 fcitx5（如清空了 extra_packages），同步移除自启动项与输入法预设，避免留下失效配置
+if ! command -v fcitx5 >/dev/null 2>&1; then
+  rm -f /etc/xdg/autostart/fcitx5.desktop /etc/xdg/fcitx5/profile /etc/profile.d/fcitx5.sh
+fi
 
 # 让双击 .deb 通过图形安装器弹安装界面：
-# 找到声明 application/vnd.debian.binary-package 的 desktop（gdebi 提供），
-# 写入全局 /etc/xdg/mimeapps.list，作为 Nautilus 默认打开方式。
+# 优先白名单（gdebi），找不到再按 MIME 声明回退搜索，
+# 写入全局 /etc/xdg/mimeapps.list 作为 Nautilus 默认打开方式（文件已存在时追加，不整体覆盖）。
 DEB_HANDLER=""
-for _f in /usr/share/applications/*.desktop; do
-  if grep -qs 'application/vnd.debian.binary-package' "$_f" 2>/dev/null; then
-    DEB_HANDLER="$(basename "$_f")"
+for _f in gdebi.desktop gdebi-gtk.desktop; do
+  if [[ -f "/usr/share/applications/$_f" ]]; then
+    DEB_HANDLER="$_f"
     break
   fi
 done
+if [[ -z "$DEB_HANDLER" ]]; then
+  for _f in /usr/share/applications/*.desktop; do
+    if grep -qs 'application/vnd.debian.binary-package' "$_f" 2>/dev/null; then
+      DEB_HANDLER="$(basename "$_f")"
+      break
+    fi
+  done
+fi
 if [[ -n "$DEB_HANDLER" ]]; then
+  MIMEAPPS=/etc/xdg/mimeapps.list
   install -d -m 0755 /etc/xdg
-  cat > /etc/xdg/mimeapps.list <<EOF
-[Default Applications]
-application/vnd.debian.binary-package=$DEB_HANDLER
-EOF
+  if [[ ! -f "$MIMEAPPS" ]]; then
+    printf '[Default Applications]\napplication/vnd.debian.binary-package=%s\n' "$DEB_HANDLER" > "$MIMEAPPS"
+  elif grep -qs '^application/vnd.debian.binary-package=' "$MIMEAPPS"; then
+    sed -i "s#^application/vnd.debian.binary-package=.*#application/vnd.debian.binary-package=$DEB_HANDLER#" "$MIMEAPPS"
+  elif grep -qs '^\[Default Applications\]' "$MIMEAPPS"; then
+    sed -i "/^\[Default Applications\]/a application/vnd.debian.binary-package=$DEB_HANDLER" "$MIMEAPPS"
+  else
+    printf '[Default Applications]\napplication/vnd.debian.binary-package=%s\n' "$DEB_HANDLER" >> "$MIMEAPPS"
+  fi
 fi
 
 # 时区：中国区默认 Asia/Shanghai（chroot 内 timedatectl 不可用，用符号链接 + tz 文件）
