@@ -5,9 +5,9 @@ Subject: [PATCH] arm64: gaokun3: import local dts and defconfig
 
 ---
  .../qcom/sc8280xp-huawei-gaokun3-camera.dtsi  | 307 +++++++++++
- .../boot/dts/qcom/sc8280xp-huawei-gaokun3.dts | 437 ++++++++++++----
+ .../boot/dts/qcom/sc8280xp-huawei-gaokun3.dts | 442 ++++++++++++----
  arch/arm64/configs/gaokun3_defconfig          | 490 ++++++++++++++++++
- 3 files changed, 1133 insertions(+), 101 deletions(-)
+ 3 files changed, 1138 insertions(+), 101 deletions(-)
  create mode 100644 arch/arm64/boot/dts/qcom/sc8280xp-huawei-gaokun3-camera.dtsi
  create mode 100644 arch/arm64/configs/gaokun3_defconfig
 
@@ -950,7 +950,19 @@ index cd575e20d..94e7eeb7e 100644
  
  	status = "okay";
  };
-@@ -1300,8 +1444,28 @@ hastings_reg_en: hastings-reg-en-state {
+@@ -1263,6 +1407,11 @@ &vamacro {
+ 	status = "okay";
+ };
+ 
++&venus {
++	firmware-name = "qcom/sc8280xp/HUAWEI/gaokun3/qcvss8280.mbn";
++	status = "okay";
++};
++
+ &wsamacro {
+ 	status = "okay";
+ };
+@@ -1300,8 +1449,28 @@ hastings_reg_en: hastings-reg-en-state {
  };
  
  &tlmm {
@@ -980,7 +992,7 @@ index cd575e20d..94e7eeb7e 100644
  
  	bt_default: bt-default-state {
  		hstp-bt-en-pins {
-@@ -1318,6 +1482,36 @@ hstp-sw-ctrl-pins {
+@@ -1318,6 +1487,36 @@ hstp-sw-ctrl-pins {
  		};
  	};
  
@@ -1017,7 +1029,7 @@ index cd575e20d..94e7eeb7e 100644
  	i2c4_default: i2c4-default-state {
  		pins = "gpio171", "gpio172";
  		function = "qup4";
-@@ -1332,6 +1526,13 @@ i2c15_default: i2c15-default-state {
+@@ -1332,6 +1531,13 @@ i2c15_default: i2c15-default-state {
  		bias-pull-up;
  	};
  
@@ -1031,7 +1043,7 @@ index cd575e20d..94e7eeb7e 100644
  	mode_pin_active: mode-pin-state {
  		pins = "gpio26";
  		function = "gpio";
-@@ -1411,6 +1612,39 @@ perst-n-pins {
+@@ -1411,6 +1617,39 @@ perst-n-pins {
  		};
  	};
  
@@ -1071,7 +1083,7 @@ index cd575e20d..94e7eeb7e 100644
  	ts0_default: ts0-default-state {
  		int-n-pins {
  			pins = "gpio175";
-@@ -1424,7 +1658,6 @@ reset-n-pins {
+@@ -1424,7 +1663,6 @@ reset-n-pins {
  			function = "gpio";
  			drive-strength = <2>;
  			bias-disable;
@@ -1079,7 +1091,7 @@ index cd575e20d..94e7eeb7e 100644
  		};
  	};
  
-@@ -1485,3 +1718,5 @@ wlan_en: wlan-en-state {
+@@ -1485,3 +1723,5 @@ wlan_en: wlan-en-state {
  		bias-pull-down;
  	};
  };
@@ -1381,7 +1393,7 @@ index 000000000..f95adc9bf
 +CONFIG_V4L_PLATFORM_DRIVERS=y
 +CONFIG_V4L_MEM2MEM_DRIVERS=y
 +CONFIG_VIDEO_QCOM_CAMSS=m
-+CONFIG_VIDEO_QCOM_IRIS=m
++CONFIG_VIDEO_QCOM_VENUS=m
 +CONFIG_VIDEO_HI846=m
 +CONFIG_VIDEO_DW9714=m
 +CONFIG_DRM=y
