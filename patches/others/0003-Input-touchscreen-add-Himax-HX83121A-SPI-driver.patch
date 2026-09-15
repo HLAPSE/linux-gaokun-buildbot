@@ -485,6 +485,16 @@ index 000000000..6b82c818d
 +static void himax_unlock(struct himax_ts_data *ts)
 +{
 +	mutex_unlock(&ts->op_lock);
++
++	/*
++	 * himax_lock() masks the IRQ via himax_quiesce_irq(). Restore it
++	 * here so that any sysfs/panel access does not permanently disable
++	 * touch interrupt. Only re-arm while the panel is still enabled and
++	 * the device is not being torn down; suspend/remove paths leave it
++	 * unmasked until the next reinit re-enables it.
++	 */
++	if (ts->panel_enabled && !ts->shutting_down)
++		himax_int_enable(ts, true);
 +}
 +
 +static void himax_mcu_ic_reset(struct himax_ts_data *ts, bool int_off)
