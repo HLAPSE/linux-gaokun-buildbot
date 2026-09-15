@@ -5,9 +5,9 @@ Subject: [PATCH] arm64: gaokun3: import local dts and defconfig
 
 ---
  .../qcom/sc8280xp-huawei-gaokun3-camera.dtsi  | 307 +++++++++++
- .../boot/dts/qcom/sc8280xp-huawei-gaokun3.dts | 449 ++++++++++++----
+ .../boot/dts/qcom/sc8280xp-huawei-gaokun3.dts | 437 ++++++++++++----
  arch/arm64/configs/gaokun3_defconfig          | 490 ++++++++++++++++++
- 3 files changed, 1145 insertions(+), 101 deletions(-)
+ 3 files changed, 1133 insertions(+), 101 deletions(-)
  create mode 100644 arch/arm64/boot/dts/qcom/sc8280xp-huawei-gaokun3-camera.dtsi
  create mode 100644 arch/arm64/configs/gaokun3_defconfig
 
@@ -462,21 +462,18 @@ index cd575e20d..94e7eeb7e 100644
  			regulator-initial-mode = <RPMH_REGULATOR_MODE_HPM>;
  		};
  
-@@ -367,9 +421,10 @@ vreg_l3b: ldo3 {
+@@ -367,9 +421,7 @@ vreg_l3b: ldo3 {
  			regulator-max-microvolt = <1200000>;
  			regulator-initial-mode = <RPMH_REGULATOR_MODE_HPM>;
  			regulator-boot-on;
 -			regulator-allow-set-load;
 -			regulator-allowed-modes = <RPMH_REGULATOR_MODE_LPM
 -						   RPMH_REGULATOR_MODE_HPM>;
-+			// HACK: wrongly voting for LPM may block DP Alt
-+			// regulator-allow-set-load;
-+			// regulator-allowed-modes = <RPMH_REGULATOR_MODE_LPM
-+			// 			   RPMH_REGULATOR_MODE_HPM>;
++			/* HACK: wrongly voting for LPM may block DP Alt mode */
  		};
  
  		vreg_l4b: ldo4 {
-@@ -377,16 +432,10 @@ vreg_l4b: ldo4 {
+@@ -377,16 +429,7 @@ vreg_l4b: ldo4 {
  			regulator-min-microvolt = <912000>;
  			regulator-max-microvolt = <912000>;
  			regulator-initial-mode = <RPMH_REGULATOR_MODE_HPM>;
@@ -490,14 +487,11 @@ index cd575e20d..94e7eeb7e 100644
 -			regulator-min-microvolt = <1200000>;
 -			regulator-max-microvolt = <1200000>;
 -			regulator-initial-mode = <RPMH_REGULATOR_MODE_HPM>;
-+			// HACK: wrongly voting for LPM may block DP Alt
-+			// regulator-allow-set-load;
-+			// regulator-allowed-modes = <RPMH_REGULATOR_MODE_LPM
-+			// 			   RPMH_REGULATOR_MODE_HPM>;
++			/* HACK: wrongly voting for LPM may block DP Alt mode */
  		};
  
  		vreg_l6b: ldo6 {
-@@ -399,21 +448,6 @@ vreg_l6b: ldo6 {
+@@ -399,21 +442,6 @@ vreg_l6b: ldo6 {
  			regulator-allowed-modes = <RPMH_REGULATOR_MODE_LPM
  						   RPMH_REGULATOR_MODE_HPM>;
  		};
@@ -519,7 +513,7 @@ index cd575e20d..94e7eeb7e 100644
  	};
  
  	regulators-1 {
-@@ -435,6 +469,8 @@ vreg_s1c: smps1 {
+@@ -435,6 +463,8 @@ vreg_s1c: smps1 {
  			regulator-always-on;
  		};
  
@@ -528,7 +522,7 @@ index cd575e20d..94e7eeb7e 100644
  		vreg_l1c: ldo1 {
  			regulator-name = "vreg_l1c";
  			regulator-min-microvolt = <1800000>;
-@@ -444,13 +480,7 @@ vreg_l1c: ldo1 {
+@@ -444,13 +474,7 @@ vreg_l1c: ldo1 {
  			regulator-allowed-modes = <RPMH_REGULATOR_MODE_LPM
  						   RPMH_REGULATOR_MODE_HPM>;
  		};
@@ -543,7 +537,7 @@ index cd575e20d..94e7eeb7e 100644
  
  		vreg_l8c: ldo8 {
  			regulator-name = "vreg_l8c";
-@@ -498,6 +528,7 @@ regulators-2 {
+@@ -498,6 +522,7 @@ regulators-2 {
  		vdd-l6-l9-l10-supply = <&vreg_s12b>;
  		vdd-l8-supply = <&vreg_s12b>;
  
@@ -551,7 +545,7 @@ index cd575e20d..94e7eeb7e 100644
  		vreg_l2d: ldo2 {
  			regulator-name = "vreg_l2d";
  			regulator-min-microvolt = <3072000>;
-@@ -508,21 +539,15 @@ vreg_l2d: ldo2 {
+@@ -508,21 +533,12 @@ vreg_l2d: ldo2 {
  						   RPMH_REGULATOR_MODE_HPM>;
  		};
  
@@ -570,31 +564,25 @@ index cd575e20d..94e7eeb7e 100644
 -			regulator-allow-set-load;
 -			regulator-allowed-modes = <RPMH_REGULATOR_MODE_LPM
 -						   RPMH_REGULATOR_MODE_HPM>;
-+			// HACK: wrongly voting for LPM may block DP Alt
-+			// regulator-allow-set-load;
-+			// regulator-allowed-modes = <RPMH_REGULATOR_MODE_LPM
-+			// 			   RPMH_REGULATOR_MODE_HPM>;
++			/* HACK: wrongly voting for LPM may block DP Alt mode */
  		};
  
  		vreg_l6d: ldo6 {
-@@ -560,11 +585,12 @@ vreg_l9d: ldo9 {
+@@ -560,11 +576,9 @@ vreg_l9d: ldo9 {
  			regulator-min-microvolt = <912000>;
  			regulator-max-microvolt = <912000>;
  			regulator-initial-mode = <RPMH_REGULATOR_MODE_HPM>;
 -			regulator-allow-set-load;
 -			regulator-allowed-modes = <RPMH_REGULATOR_MODE_LPM
 -						   RPMH_REGULATOR_MODE_HPM>;
-+			// HACK: wrongly voting for LPM may block DP Alt
-+			// regulator-allow-set-load;
-+			// regulator-allowed-modes = <RPMH_REGULATOR_MODE_LPM
-+			// 			   RPMH_REGULATOR_MODE_HPM>;
++			/* HACK: wrongly voting for LPM may block DP Alt mode */
  		};
 -
 +/*
  		vreg_l10d: ldo10 {
  			regulator-name = "vreg_l10d";
  			regulator-min-microvolt = <912000>;
-@@ -574,7 +600,11 @@ vreg_l10d: ldo10 {
+@@ -574,7 +588,11 @@ vreg_l10d: ldo10 {
  			regulator-allowed-modes = <RPMH_REGULATOR_MODE_LPM
  						   RPMH_REGULATOR_MODE_HPM>;
  		};
@@ -606,7 +594,7 @@ index cd575e20d..94e7eeb7e 100644
  };
  
  &dispcc0 {
-@@ -595,34 +625,58 @@ &gpi_dma2 {
+@@ -595,34 +613,58 @@ &gpi_dma2 {
  
  &gpu {
  	status = "okay";
@@ -676,7 +664,7 @@ index cd575e20d..94e7eeb7e 100644
  };
  
  &i2c15 {
-@@ -637,7 +691,15 @@ embedded-controller@38 {
+@@ -637,7 +679,15 @@ embedded-controller@38 {
  		compatible = "huawei,gaokun3-ec";
  		reg = <0x38>;
  
@@ -693,7 +681,7 @@ index cd575e20d..94e7eeb7e 100644
  
  		#address-cells = <1>;
  		#size-cells = <0>;
-@@ -647,7 +709,6 @@ connector@0 {
+@@ -647,7 +697,6 @@ connector@0 {
  			reg = <0>;
  			power-role = "dual";
  			data-role = "dual";
@@ -701,7 +689,7 @@ index cd575e20d..94e7eeb7e 100644
  			ports {
  				#address-cells = <1>;
  				#size-cells = <0>;
-@@ -655,7 +716,7 @@ ports {
+@@ -655,7 +704,7 @@ ports {
  				port@0 {
  					reg = <0>;
  
@@ -710,7 +698,7 @@ index cd575e20d..94e7eeb7e 100644
  						remote-endpoint = <&usb_0_dwc3_hs>;
  					};
  				};
-@@ -663,7 +724,7 @@ ucsi0_hs_in: endpoint {
+@@ -663,7 +712,7 @@ ucsi0_hs_in: endpoint {
  				port@1 {
  					reg = <1>;
  
@@ -719,7 +707,7 @@ index cd575e20d..94e7eeb7e 100644
  						remote-endpoint = <&usb_0_qmpphy_out>;
  					};
  				};
-@@ -725,7 +786,8 @@ &mdss0_dp0 {
+@@ -725,7 +774,8 @@ &mdss0_dp0 {
  };
  
  &mdss0_dp0_out {
@@ -729,7 +717,7 @@ index cd575e20d..94e7eeb7e 100644
  	remote-endpoint = <&usb_0_qmpphy_dp_in>;
  };
  
-@@ -734,10 +796,92 @@ &mdss0_dp1 {
+@@ -734,10 +784,92 @@ &mdss0_dp1 {
  };
  
  &mdss0_dp1_out {
@@ -823,7 +811,7 @@ index cd575e20d..94e7eeb7e 100644
  &pcie2a {
  	perst-gpios = <&tlmm 143 GPIO_ACTIVE_LOW>;
  	wake-gpios = <&tlmm 145 GPIO_ACTIVE_LOW>;
-@@ -785,6 +929,9 @@ wifi@0 {
+@@ -785,6 +917,9 @@ wifi@0 {
  		vddrfa0p8-supply = <&vreg_pmu_rfa_0p8>;
  		vddrfa1p2-supply = <&vreg_pmu_rfa_1p2>;
  		vddrfa1p8-supply = <&vreg_pmu_rfa_1p7>;
@@ -833,7 +821,7 @@ index cd575e20d..94e7eeb7e 100644
  	};
  };
  
-@@ -969,13 +1116,18 @@ &remoteproc_nsp0 {
+@@ -969,13 +1104,18 @@ &remoteproc_nsp0 {
  	status = "okay";
  };
  
@@ -853,7 +841,7 @@ index cd575e20d..94e7eeb7e 100644
  	audio-routing = "SpkrLeft IN", "WSA_SPK1 OUT",
  			"SpkrRight IN", "WSA_SPK2 OUT",
  			"IN1_HPHL", "HPHL_OUT",
-@@ -1125,6 +1277,8 @@ bluetooth {
+@@ -1125,6 +1265,8 @@ bluetooth {
  		vddrfa1p7-supply = <&vreg_pmu_rfa_1p7>;
  
  		max-speed = <3200000>;
@@ -862,7 +850,7 @@ index cd575e20d..94e7eeb7e 100644
  	};
  };
  
-@@ -1141,7 +1295,7 @@ &usb_0_dwc3_hs {
+@@ -1141,7 +1283,7 @@ &usb_0_dwc3_hs {
  };
  
  &usb_0_hsphy {
@@ -871,7 +859,7 @@ index cd575e20d..94e7eeb7e 100644
  	vdda18-supply = <&vreg_l1c>;
  	vdda33-supply = <&vreg_l7d>;
  
-@@ -1149,9 +1303,10 @@ &usb_0_hsphy {
+@@ -1149,9 +1291,10 @@ &usb_0_hsphy {
  };
  
  &usb_0_qmpphy {
@@ -884,7 +872,7 @@ index cd575e20d..94e7eeb7e 100644
  	orientation-switch;
  
  	status = "okay";
-@@ -1178,7 +1333,7 @@ &usb_1_dwc3_hs {
+@@ -1178,7 +1321,7 @@ &usb_1_dwc3_hs {
  };
  
  &usb_1_hsphy {
@@ -893,7 +881,7 @@ index cd575e20d..94e7eeb7e 100644
  	vdda18-supply = <&vreg_l1c>;
  	vdda33-supply = <&vreg_l13c>;
  
-@@ -1186,9 +1341,10 @@ &usb_1_hsphy {
+@@ -1186,9 +1329,10 @@ &usb_1_hsphy {
  };
  
  &usb_1_qmpphy {
@@ -906,7 +894,7 @@ index cd575e20d..94e7eeb7e 100644
  	orientation-switch;
  
  	status = "okay";
-@@ -1207,7 +1363,7 @@ &usb_2 {
+@@ -1207,7 +1351,7 @@ &usb_2 {
  };
  
  &usb_2_hsphy0 {
@@ -915,7 +903,7 @@ index cd575e20d..94e7eeb7e 100644
  	vdda18-supply = <&vreg_l1c>;
  	vdda33-supply = <&vreg_l7d>;
  
-@@ -1215,7 +1371,7 @@ &usb_2_hsphy0 {
+@@ -1215,7 +1359,7 @@ &usb_2_hsphy0 {
  };
  
  &usb_2_hsphy1 {
@@ -924,7 +912,7 @@ index cd575e20d..94e7eeb7e 100644
  	vdda18-supply = <&vreg_l1c>;
  	vdda33-supply = <&vreg_l7d>;
  
-@@ -1223,7 +1379,7 @@ &usb_2_hsphy1 {
+@@ -1223,7 +1367,7 @@ &usb_2_hsphy1 {
  };
  
  &usb_2_hsphy2 {
@@ -933,7 +921,7 @@ index cd575e20d..94e7eeb7e 100644
  	vdda18-supply = <&vreg_l8c>;
  	vdda33-supply = <&vreg_l2d>;
  
-@@ -1231,7 +1387,7 @@ &usb_2_hsphy2 {
+@@ -1231,7 +1375,7 @@ &usb_2_hsphy2 {
  };
  
  &usb_2_hsphy3 {
@@ -942,7 +930,7 @@ index cd575e20d..94e7eeb7e 100644
  	vdda18-supply = <&vreg_l8c>;
  	vdda33-supply = <&vreg_l2d>;
  
-@@ -1239,15 +1395,15 @@ &usb_2_hsphy3 {
+@@ -1239,15 +1383,15 @@ &usb_2_hsphy3 {
  };
  
  &usb_2_qmpphy0 {
@@ -962,7 +950,7 @@ index cd575e20d..94e7eeb7e 100644
  
  	status = "okay";
  };
-@@ -1300,8 +1456,28 @@ hastings_reg_en: hastings-reg-en-state {
+@@ -1300,8 +1444,28 @@ hastings_reg_en: hastings-reg-en-state {
  };
  
  &tlmm {
@@ -992,7 +980,7 @@ index cd575e20d..94e7eeb7e 100644
  
  	bt_default: bt-default-state {
  		hstp-bt-en-pins {
-@@ -1318,6 +1494,36 @@ hstp-sw-ctrl-pins {
+@@ -1318,6 +1482,36 @@ hstp-sw-ctrl-pins {
  		};
  	};
  
@@ -1029,7 +1017,7 @@ index cd575e20d..94e7eeb7e 100644
  	i2c4_default: i2c4-default-state {
  		pins = "gpio171", "gpio172";
  		function = "qup4";
-@@ -1332,6 +1538,13 @@ i2c15_default: i2c15-default-state {
+@@ -1332,6 +1526,13 @@ i2c15_default: i2c15-default-state {
  		bias-pull-up;
  	};
  
@@ -1043,7 +1031,7 @@ index cd575e20d..94e7eeb7e 100644
  	mode_pin_active: mode-pin-state {
  		pins = "gpio26";
  		function = "gpio";
-@@ -1411,6 +1624,39 @@ perst-n-pins {
+@@ -1411,6 +1612,39 @@ perst-n-pins {
  		};
  	};
  
@@ -1083,7 +1071,7 @@ index cd575e20d..94e7eeb7e 100644
  	ts0_default: ts0-default-state {
  		int-n-pins {
  			pins = "gpio175";
-@@ -1424,7 +1670,6 @@ reset-n-pins {
+@@ -1424,7 +1658,6 @@ reset-n-pins {
  			function = "gpio";
  			drive-strength = <2>;
  			bias-disable;
@@ -1091,7 +1079,7 @@ index cd575e20d..94e7eeb7e 100644
  		};
  	};
  
-@@ -1485,3 +1730,5 @@ wlan_en: wlan-en-state {
+@@ -1485,3 +1718,5 @@ wlan_en: wlan-en-state {
  		bias-pull-down;
  	};
  };
