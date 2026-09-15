@@ -225,6 +225,7 @@ apt-get install -y \
     fonts-noto-cjk \
     fonts-noto-color-emoji \
     fcitx5-chinese-addons \
+    gdebi \
     gnome-tweaks gnome-shell-extension-manager \
     mpv v4l-utils vim nano ripgrep git htop screen \
     alsa-utils pipewire-alsa \

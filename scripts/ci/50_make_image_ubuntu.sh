@@ -119,6 +119,24 @@ systemctl enable gdm NetworkManager ssh \
 # 编译 system-db:local（screen-keyboard-enabled 等镜像默认值）进 dconf 数据库
 dconf update || true
 
+# 让双击 .deb 通过图形安装器弹安装界面：
+# 找到声明 application/vnd.debian.binary-package 的 desktop（gdebi 提供），
+# 写入全局 /etc/xdg/mimeapps.list，作为 Nautilus 默认打开方式。
+DEB_HANDLER=""
+for _f in /usr/share/applications/*.desktop; do
+  if grep -qs 'application/vnd.debian.binary-package' "$_f" 2>/dev/null; then
+    DEB_HANDLER="$(basename "$_f")"
+    break
+  fi
+done
+if [[ -n "$DEB_HANDLER" ]]; then
+  install -d -m 0755 /etc/xdg
+  cat > /etc/xdg/mimeapps.list <<EOF
+[Default Applications]
+application/vnd.debian.binary-package=$DEB_HANDLER
+EOF
+fi
+
 cat >> /etc/initramfs-tools/modules <<'MODEOF'
 # Storage and USB
 nvme
