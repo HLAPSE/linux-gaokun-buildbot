@@ -227,16 +227,11 @@ jobs:
           sudo chroot "$ROOTFS_DIR" /usr/bin/env UBUNTU_RELEASE="$UBUNTU_RELEASE" /bin/bash -euxo pipefail -c '
             export DEBIAN_FRONTEND=noninteractive
 
-            # 系统源切换到清华 TUNA 中国镜像（aarch64 使用 ubuntu-ports）
-            # 按 host 匹配、同时覆盖 http/https；arm64 只用 ports.ubuntu.com，不要映射到 x86 的 /ubuntu 仓库
-            if ls /etc/apt/sources.list.d/*.sources >/dev/null 2>&1; then
-              sed -i 's#http://ports.ubuntu.com/ubuntu-ports#https://mirrors.tuna.tsinghua.edu.cn/ubuntu-ports#g' \
-                -e 's#https://ports.ubuntu.com/ubuntu-ports#https://mirrors.tuna.tsinghua.edu.cn/ubuntu-ports#g' \
-                /etc/apt/sources.list.d/*.sources
-            fi
-            sed -i 's#http://ports.ubuntu.com/ubuntu-ports#https://mirrors.tuna.tsinghua.edu.cn/ubuntu-ports#g' \
-              -e 's#https://ports.ubuntu.com/ubuntu-ports#https://mirrors.tuna.tsinghua.edu.cn/ubuntu-ports#g' \
-              /etc/apt/sources.list 2>/dev/null || true
+            # 系统源切换到清华 TUNA 中国镜像（走 http：ubuntu-base rootfs 无 CA 证书，
+            # https 会 certificate verify failed；包完整性由 apt GPG 签名保证）
+            # Ubuntu 26.04 起 arm64 已迁入主 archive，rootfs 初始源为 http://(archive|security).ubuntu.com
+            sed -i -E -e "s#http://(archive|security)\.ubuntu\.com/ubuntu#http://mirrors.tuna.tsinghua.edu.cn/ubuntu#g" \
+              /etc/apt/sources.list /etc/apt/sources.list.d/*.sources 2>/dev/null || true
 
             apt-get update
             apt-get install -y locales
