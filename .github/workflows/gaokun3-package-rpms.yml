@@ -53,21 +53,30 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v6
 
-      - name: Checkout Linux source
-        uses: actions/checkout@v6
-        with:
-          repository: torvalds/linux
-          ref: ${{ env.KERNEL_TAG }}
-          fetch-depth: 1
-          path: build-packages/mainline-linux
-
       - name: Install host dependencies
         run: |
           set -euxo pipefail
           sudo apt-get update
           sudo apt-get install -y \
             git make gcc bc bison flex cpio rsync kmod \
-            libssl-dev libelf-dev dwarves ccache
+            libssl-dev libelf-dev dwarves ccache aria2 xz-utils
+
+      - name: Download Linux source tarball
+        run: |
+          set -euxo pipefail
+          kern_ver="${KERNEL_TAG#v}"
+          mkdir -p build-packages/mainline-linux
+          aria2c -x 4 -s 4 -d build-packages -o linux.tar.xz \
+            "https://cdn.kernel.org/pub/linux/kernel/v${kern_ver%%.*}.x/linux-${kern_ver}.tar.xz" || \
+          aria2c -x 4 -s 4 -d build-packages -o linux.tar.xz \
+            "https://mirrors.edge.kernel.org/pub/linux/kernel/v${kern_ver%%.*}.x/linux-${kern_ver}.tar.xz"
+          tar -xJf build-packages/linux.tar.xz -C build-packages/mainline-linux --strip-components=1
+          cd build-packages/mainline-linux
+          git init -q
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add .
+          git -c commit.gpgsign=false commit -q -m "Linux ${KERNEL_TAG} baseline"
 
       - name: Resolve package release tag
         id: release_meta
