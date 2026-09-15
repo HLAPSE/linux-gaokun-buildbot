@@ -1,7 +1,7 @@
-From abe3d718c79bd22505bcff8e35e9b8cae13886e0 Mon Sep 17 00:00:00 2001
+From 0dd7013e27b2fe06c5875de36e88e6284f8db609 Mon Sep 17 00:00:00 2001
 From: cool <bilibili@att.net>
 Date: Sat, 11 Jul 2026 16:55:30 +0000
-Subject: [PATCH 20/20] arm64: gaokun3: import local dts and defconfig
+Subject: [PATCH] arm64: gaokun3: import local dts and defconfig
 
 ---
  .../qcom/sc8280xp-huawei-gaokun3-camera.dtsi  | 307 +++++++++++
@@ -325,7 +325,7 @@ index 000000000..69fa4db9b
 +	};
 +};
 diff --git a/arch/arm64/boot/dts/qcom/sc8280xp-huawei-gaokun3.dts b/arch/arm64/boot/dts/qcom/sc8280xp-huawei-gaokun3.dts
-index f3c00be67..94e7eeb7e 100644
+index cd575e20d..94e7eeb7e 100644
 --- a/arch/arm64/boot/dts/qcom/sc8280xp-huawei-gaokun3.dts
 +++ b/arch/arm64/boot/dts/qcom/sc8280xp-huawei-gaokun3.dts
 @@ -11,6 +11,7 @@
@@ -680,7 +680,7 @@ index f3c00be67..94e7eeb7e 100644
  		compatible = "huawei,gaokun3-ec";
  		reg = <0x38>;
  
--		interrupts-extended = <&tlmm 107 IRQ_TYPE_LEVEL_LOW>;
+-		interrupts-extended = <&tlmm 103 IRQ_TYPE_LEVEL_LOW>;
 +		interrupts-extended = <&pdc 215 IRQ_TYPE_LEVEL_LOW>;
 +		enable-gpios = <&tlmm 173 GPIO_ACTIVE_HIGH>;
 +		bat-gpios = <&tlmm 41 GPIO_ACTIVE_HIGH>;
@@ -1594,5 +1594,5 @@ index 000000000..f95adc9bf
 +# CONFIG_FTRACE is not set
 +# CONFIG_RUNTIME_TESTING_MENU is not set
 -- 
-2.55.0
+2.43.0
 
