@@ -435,6 +435,24 @@ exit
 - Fedora 44 的 `90-loaderentry.install` 会从 `/usr/lib/modules/<kernel-release>/dtb/` 查找设备树，所以 DTB 必须放到这个标准路径里。
 - Fedora 默认的 `51-dracut-rescue.install` 会额外生成 `0-rescue` 启动项，但这个救援项默认不带 `devicetree`，在 gaokun3 上不可用，因此这里显式将其禁用。
 
+### 中文输入法（fcitx5）预设
+
+本镜像针对「纯触屏输入中文」这一场景，内置了 fcitx5 输入法相关的默认配置，均为用户态，不涉及内核，与 Ubuntu 构建通用：
+
+- **CJK 字体**：安装 `google-noto-sans-cjk-fonts`，保证中文候选/界面不出现方框方块。
+- **输入法环境变量**：`/etc/profile.d/fcitx5.sh` 写入 `XMODIFIERS=@im=fcitx`、`GTK_IM_MODULE=fcitx`、`QT_IM_MODULE=fcitx`（已有值时尊重用户配置）。
+- **开机自启**：`/etc/xdg/autostart/fcitx5.desktop` 让 fcitx5 随桌面一起启动。
+- **默认拼音**：`/etc/xdg/fcitx5/profile` 让新用户默认即启用「美式键盘 + 拼音」。
+- **屏幕键盘**：`/etc/dconf/db/local.d/00-screen-keyboard` 设 `screen-keyboard-enabled=true`，桌面会话下屏幕键盘默认开启。
+
+手动构建时，把上述 4 个小文件按路径放进 `$ROOTFS_DIR`，并在「第 4 步 chroot 初始化」末尾补一行使其生效：
+
+```bash
+dconf update || true
+```
+
+> 候选面板的字号/每页个数属于 fcitx5 外观主题（依赖已安装的主题），默认不强改。若触屏点候选偏小，首启后在「fcitx5 设置 → 外观」里调大字号、减少每页候选数。
+
 ### 触屏驱动鸣谢
 
 - [chiyuki0325/EGoTouchRev-Linux](https://github.com/chiyuki0325/EGoTouchRev-Linux)：本仓库直接集成的 `himax_hx83121a_spi` 触屏驱动与调参算法的主要上游来源。
