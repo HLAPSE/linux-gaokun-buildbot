@@ -111,6 +111,24 @@ systemctl enable gdm NetworkManager sshd \
 # 编译 system-db:local（screen-keyboard-enabled 等镜像默认值）进 dconf 数据库
 dconf update || true
 
+# 让双击 .rpm 通过 GNOME Software 弹安装界面：
+# 找到声明 application/x-rpm 的 desktop（gnome-software 提供，内置本地 rpm 安装），
+# 写入全局 /etc/xdg/mimeapps.list，作为 Nautilus 默认打开方式。
+RPM_HANDLER=""
+for _f in /usr/share/applications/*.desktop; do
+  if grep -qs 'application/x-rpm' "$_f" 2>/dev/null; then
+    RPM_HANDLER="$(basename "$_f")"
+    break
+  fi
+done
+if [[ -n "$RPM_HANDLER" ]]; then
+  install -d -m 0755 /etc/xdg
+  cat > /etc/xdg/mimeapps.list <<EOF
+[Default Applications]
+application/x-rpm=$RPM_HANDLER
+EOF
+fi
+
 cat > /etc/dracut.conf.d/matebook.conf <<'MODEOF'
 hostonly="no"
 add_drivers+=" btrfs nvme phy-qcom-qmp-pcie phy-qcom-qmp-combo phy-qcom-qmp-usb phy-qcom-snps-femto-v2 usb-storage uas typec pci-pwrctrl-pwrseq ath11k ath11k_pci i2c-hid-of "
