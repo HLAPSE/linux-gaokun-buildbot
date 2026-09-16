@@ -8,10 +8,13 @@ install_common_image_assets() {
     "tools/bluetooth/patch-nvm-bdaddr.py:/usr/local/bin/patch-nvm-bdaddr.py"
     "tools/monitors/gdm-monitor-sync:/usr/local/bin/gdm-monitor-sync"
     "tools/touchscreen-tuner/touchscreen-tune:/usr/local/bin/touchscreen-tune"
+    "tools/hwcheck/gaokun-check:/usr/local/bin/gaokun-check"
+    "tools/growroot/gaokun-grow-rootfs:/usr/local/bin/gaokun-grow-rootfs"
   )
   local service_assets=(
     "tools/bluetooth/patch-nvm-bdaddr.service:/etc/systemd/system/patch-nvm-bdaddr.service"
     "tools/monitors/gdm-monitor-sync.service:/etc/systemd/system/gdm-monitor-sync.service"
+    "tools/growroot/gaokun-grow-rootfs.service:/etc/systemd/system/gaokun-grow-rootfs.service"
   )
   local data_assets=(
     "tools/audio/sc8280xp.conf:/usr/share/alsa/ucm2/Qualcomm/sc8280xp/sc8280xp.conf"

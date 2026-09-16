@@ -98,6 +98,14 @@ chown -R user:user /home/user
 
 install -d -m 1777 -o root -g root /tmp/.X11-unix
 
+# GDM 自动登录：平板形态 + 补丁测试场景（触屏失效时无需键盘输密码）
+# 如需关闭，注释掉下面两行 AutomaticLogin 即可
+cat > /etc/gdm3/custom.conf <<'EOF'
+[daemon]
+AutomaticLoginEnable=True
+AutomaticLogin=user
+EOF
+
 cat > /etc/systemd/system/gaokun-fix-x11-unix.service <<'EOF'
 [Unit]
 Description=Fix /tmp/.X11-unix ownership for Xwayland
@@ -114,7 +122,7 @@ EOF
 
 systemctl enable gdm NetworkManager ssh \
   gaokun-fix-x11-unix.service gdm-monitor-sync.service \
-  patch-nvm-bdaddr.service || true
+  gaokun-grow-rootfs.service patch-nvm-bdaddr.service || true
 
 # 编译 system-db:local（screen-keyboard-enabled 等镜像默认值）进 dconf 数据库
 # dconf 由 dconf-cli 提供（构建时已显式安装）；缺失直接失败，避免屏幕键盘等默认值静默丢失

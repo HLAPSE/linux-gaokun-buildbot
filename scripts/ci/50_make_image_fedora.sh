@@ -105,8 +105,17 @@ install -d -m 0755 /home/user/.config
 install -Dm644 /usr/local/share/gaokun/monitors.xml /home/user/.config/monitors.xml
 chown -R user:user /home/user
 
+# GDM 自动登录：平板形态 + 补丁测试场景（触屏失效时无需键盘输密码）
+# 如需关闭，注释掉下面两行 AutomaticLogin 即可
+cat > /etc/gdm/custom.conf <<'EOF'
+[daemon]
+AutomaticLoginEnable=True
+AutomaticLogin=user
+EOF
+
 systemctl enable gdm NetworkManager sshd \
-  gdm-monitor-sync.service patch-nvm-bdaddr.service || true
+  gdm-monitor-sync.service gaokun-grow-rootfs.service \
+  patch-nvm-bdaddr.service || true
 
 # 编译 system-db:local（screen-keyboard-enabled 等镜像默认值）进 dconf 数据库
 # dconf 由 dconf 包提供（构建时已显式安装）；缺失直接失败，避免屏幕键盘等默认值静默丢失
