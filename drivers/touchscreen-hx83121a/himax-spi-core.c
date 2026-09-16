@@ -126,6 +126,8 @@ struct himax_ts_data {
 	bool panel_prepared;
 	bool panel_enabled;
 	bool shutting_down;
+	/* IC brought up by a successful reinit; safe to arm the IRQ */
+	bool hw_ready;
 	struct gpio_desc *gpiod_rst;
 	struct device *dev;
 	struct spi_device *spi;
@@ -408,6 +410,18 @@ static void himax_lock(struct himax_ts_data *ts)
 static void himax_unlock(struct himax_ts_data *ts)
 {
 	mutex_unlock(&ts->op_lock);
+
+	/*
+	 * himax_lock() masks the IRQ via himax_quiesce_irq(). Restore it
+	 * here so that any sysfs/panel access does not permanently disable
+	 * touch interrupt. Only re-arm while the panel is still enabled,
+	 * the IC has been brought up by a successful reinit, and the device
+	 * is not being torn down; otherwise a stuck level-low INT line
+	 * (uninitialized IC, or held in reset after power-down) would storm
+	 * the CPU before the reinit work gets a chance to run.
+	 */
+	if (ts->panel_enabled && ts->hw_ready && !ts->shutting_down)
+		himax_int_enable(ts, true);
 }
 
 static void himax_mcu_ic_reset(struct himax_ts_data *ts, bool int_off)
@@ -683,6 +697,7 @@ static int himax_hw_reinit(struct himax_ts_data *ts, bool check_crc)
 		dev_err(ts->dev, "%s: power-on init failed\n", __func__);
 
 out_enable_irq:
+	ts->hw_ready = !ret;
 	if (!ret)
 		himax_int_enable(ts, true);
 	return ret;
@@ -714,6 +729,7 @@ static int himax_hw_reinit_retry(struct himax_ts_data *ts, bool check_crc,
 
 static void himax_power_down(struct himax_ts_data *ts)
 {
+	ts->hw_ready = false;
 	himax_release_all_touches(ts);
 	gpiod_set_value_cansleep(ts->gpiod_rst, 1);
 }
