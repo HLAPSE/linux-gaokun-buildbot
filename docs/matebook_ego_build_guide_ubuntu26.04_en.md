@@ -225,6 +225,10 @@ apt-get install -y \
     fonts-noto-cjk \
     fonts-noto-color-emoji \
     fcitx5-chinese-addons \
+    fcitx5-frontend-gtk3 fcitx5-frontend-gtk4 \
+    fcitx5-frontend-qt5 fcitx5-frontend-qt6 \
+    gdebi \
+    dconf-cli \
     gnome-tweaks gnome-shell-extension-manager \
     mpv v4l-utils vim nano ripgrep git htop screen \
     alsa-utils pipewire-alsa \
@@ -527,6 +531,25 @@ Notes:
 - Default uses `--entry-token=machine-id`, so final entry filenames will be `/boot/efi/loader/entries/<machine-id>-<kernel-release>.conf`.
 - Kernel, `initrd` and DTB will be automatically copied to `/boot/efi/<machine-id>/<kernel-release>/`; this is the standard BLS Type #1 directory layout.
 
+### Chinese Input Method (fcitx5) Presets
+
+Targeting the "touch-only Chinese input" scenario on this device, the image ships default fcitx5 configurations. All are user-space and kernel-independent, shared between Ubuntu and Fedora builds:
+
+- **CJK fonts**: `fonts-noto-cjk` (already in the base package list) so Chinese candidates/UI never render as boxes.
+- **Input method environment variables**: `/etc/profile.d/fcitx5.sh` sets `XMODIFIERS=@im=fcitx`, `GTK_IM_MODULE=fcitx`, `QT_IM_MODULE=fcitx` (existing values are respected).
+- **Autostart**: `/etc/xdg/autostart/fcitx5.desktop` starts fcitx5 with the desktop session.
+- **Default Pinyin**: `/etc/xdg/fcitx5/profile` enables "US keyboard + Pinyin" by default for new users.
+- **On-screen keyboard**: `/etc/dconf/db/local.d/00-screen-keyboard` sets `screen-keyboard-enabled=true`, so the on-screen keyboard is enabled by default in desktop sessions.
+
+For manual builds, place the 4 small files above into `$ROOTFS_DIR` at their paths, and append the following at the end of "Step 4 chroot initialization" to make them take effect:
+
+```bash
+# dconf-cli is included in the Step 3 package list; a "command not found" means it was missed
+dconf update
+```
+
+> Candidate font size / candidates per page belong to the fcitx5 theme (depends on installed themes) and are not force-changed by default. If touch targets feel small, enlarge the font and reduce candidates per page in "fcitx5 Settings → Appearance" after first boot.
+
 ### 4. Final Cleanup
 
 ```bash
@@ -542,3 +565,4 @@ sudo losetup -d $LOOP
 - For dual boot EFI overlay method, refer to [dual_boot_guide_en.md](dual_boot_guide_en.md)
 - EL2 support is already included when you also build the `-gaokun3-el2` kernel variant in this guide.
 - Refer to [el2_kvm_guide_en.md](el2_kvm_guide_en.md) for implementation details, boot-chain structure, and debugging notes.
+- CI-built images ship a default `user` account (password `user`, passwordless sudo); change the password with `passwd` soon after first boot.
