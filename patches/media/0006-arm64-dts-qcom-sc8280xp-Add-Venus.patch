@@ -1,19 +1,14 @@
-From 70204bcf2c11c24213ea2899562e790759410867 Mon Sep 17 00:00:00 2001
+From ba71c0812b095179f6a9d9ec73ad418c008ab462 Mon Sep 17 00:00:00 2001
 From: Konrad Dybcio <konrad.dybcio@linaro.org>
-Date: Tue, 25 Apr 2023 13:55:39 +0000
+Date: Mon, 14 Sep 2026 11:31:43 +0000
 Subject: [PATCH 6/6] arm64: dts: qcom: sc8280xp: Add Venus
 
-Add the required nodes to enable Venus on sc8280xp.
-
-Signed-off-by: Konrad Dybcio <konrad.dybcio@linaro.org>
-[ johan: use sm8350 videocc defines ]
-Signed-off-by: Johan Hovold <johan+linaro@kernel.org>
 ---
  arch/arm64/boot/dts/qcom/sc8280xp.dtsi | 86 ++++++++++++++++++++++++++
  1 file changed, 86 insertions(+)
 
 diff --git a/arch/arm64/boot/dts/qcom/sc8280xp.dtsi b/arch/arm64/boot/dts/qcom/sc8280xp.dtsi
-index 60228990c..6f4fcd126 100644
+index b563abb4c..f44c27321 100644
 --- a/arch/arm64/boot/dts/qcom/sc8280xp.dtsi
 +++ b/arch/arm64/boot/dts/qcom/sc8280xp.dtsi
 @@ -11,6 +11,7 @@
@@ -41,7 +36,7 @@ index 60228990c..6f4fcd126 100644
  		};
  
 +		venus: video-codec@aa00000 {
-+			compatible = "qcom,sm8350-venus";
++			compatible = "qcom,sc8280xp-venus";
 +			reg = <0 0x0aa00000 0 0x100000>;
 +			interrupts = <GIC_SPI 174 IRQ_TYPE_LEVEL_HIGH>;
 +
@@ -123,6 +118,3 @@ index 60228990c..6f4fcd126 100644
  		cci0: cci@ac4a000 {
  			compatible = "qcom,sc8280xp-cci", "qcom,msm8996-cci";
  			reg = <0 0x0ac4a000 0 0x1000>;
--- 
-2.52.0
-
