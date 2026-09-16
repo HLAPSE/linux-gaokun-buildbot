@@ -326,7 +326,7 @@ sudo cp $GAOKUN_DIR/tools/audio/sc8280xp.conf \
 
 # Shared image assets used by the CI image pipeline
 sudo mkdir -p $ROOTFS_DIR/usr/local/share/gaokun
-sudo cp -a $GAOKUN_DIR/tools/image-assets/etc/. \
+sudo cp -a --no-preserve=ownership $GAOKUN_DIR/tools/image-assets/etc/. \
     $ROOTFS_DIR/etc/
 sudo cp $GAOKUN_DIR/tools/image-assets/usr/local/share/gaokun/monitors.xml \
     $ROOTFS_DIR/usr/local/share/gaokun/monitors.xml
@@ -398,7 +398,7 @@ sudo mount ${LOOP}p2 $MNT
 sudo mkdir -p $MNT/boot/efi
 sudo mount ${LOOP}p1 $MNT/boot/efi
 
-sudo rsync -aHAX --info=progress2 --exclude='/proc/*' --exclude='/sys/*' --exclude='/dev/*' --exclude='/run/*' $ROOTFS_DIR/ $MNT/
+sudo rsync -aHAX --chown=root:root --info=progress2 --exclude='/proc/*' --exclude='/sys/*' --exclude='/dev/*' --exclude='/run/*' $ROOTFS_DIR/ $MNT/
 
 sudo tee $MNT/etc/fstab > /dev/null <<EOF
 UUID=${ROOT_UUID}  /         ext4   errors=remount-ro,noatime  0  1
@@ -446,6 +446,9 @@ EOF
 
 systemctl enable gdm-monitor-sync.service \
     patch-nvm-bdaddr.service
+
+# Desktop images do not need to block on network being online; this waits 7s+ on Wi-Fi
+systemctl disable NetworkManager-wait-online.service || true
 
 cat > /etc/systemd/system/gaokun-fix-x11-unix.service <<'EOF'
 [Unit]

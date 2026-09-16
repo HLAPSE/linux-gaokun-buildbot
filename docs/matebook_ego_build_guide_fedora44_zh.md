@@ -262,7 +262,7 @@ sudo cp $GAOKUN_DIR/tools/audio/sc8280xp.conf \
 
 # 复用 CI 镜像流水线里的共享资源
 sudo mkdir -p $ROOTFS_DIR/usr/local/share/gaokun
-sudo cp -a $GAOKUN_DIR/tools/image-assets/etc/. \
+sudo cp -a --no-preserve=ownership $GAOKUN_DIR/tools/image-assets/etc/. \
     $ROOTFS_DIR/etc/
 sudo cp $GAOKUN_DIR/tools/image-assets/usr/local/share/gaokun/monitors.xml \
     $ROOTFS_DIR/usr/local/share/gaokun/monitors.xml
@@ -315,7 +315,7 @@ sudo mount -o subvol=@var ${LOOP}p2 /mnt/ego-fedora/var
 sudo mkdir -p /mnt/ego-fedora/boot/efi
 sudo mount ${LOOP}p1 /mnt/ego-fedora/boot/efi
 
-sudo rsync -aHAX --info=progress2 --exclude='/proc/*' --exclude='/sys/*' --exclude='/dev/*' --exclude='/run/*' $ROOTFS_DIR/ /mnt/ego-fedora/
+sudo rsync -aHAX --chown=root:root --info=progress2 --exclude='/proc/*' --exclude='/sys/*' --exclude='/dev/*' --exclude='/run/*' $ROOTFS_DIR/ /mnt/ego-fedora/
 
 sudo tee /mnt/ego-fedora/etc/fstab > /dev/null <<EOF
 UUID=${ROOT_UUID}  /         btrfs  subvol=@,compress=zstd:1,ssd,noatime  0  0
@@ -376,6 +376,9 @@ EOF
 
 systemctl enable gdm-monitor-sync.service \
     patch-nvm-bdaddr.service
+
+# 桌面场景无需等待网络就绪，Wi-Fi 下该服务会白等 7s 以上
+systemctl disable NetworkManager-wait-online.service || true
 
 dracut --force --kver $KREL
 if [ -n "$KREL_EL2" ]; then

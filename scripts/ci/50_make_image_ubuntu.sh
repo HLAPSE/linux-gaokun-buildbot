@@ -51,7 +51,8 @@ sudo mount "${LOOP}p2" "$MNT"
 sudo mkdir -p "$MNT/boot/efi"
 sudo mount "${LOOP}p1" "$MNT/boot/efi"
 
-sudo rsync -aHAX --exclude='/proc/*' --exclude='/sys/*' --exclude='/dev/*' --exclude='/run/*' "$ROOTFS_DIR/" "$MNT/"
+# --chown=root:root：rsync -a 会把源根目录的属主带到镜像 / 上（CI 里 ROOTFS_DIR 属于 runner 用户）
+sudo rsync -aHAX --chown=root:root --exclude='/proc/*' --exclude='/sys/*' --exclude='/dev/*' --exclude='/run/*' "$ROOTFS_DIR/" "$MNT/"
 install_common_image_assets "$MNT" "$GAOKUN_DIR"
 
 sudo tee "$MNT/etc/fstab" >/dev/null <<EOF
@@ -123,6 +124,9 @@ EOF
 systemctl enable gdm NetworkManager ssh \
   gaokun-fix-x11-unix.service gdm-monitor-sync.service \
   gaokun-grow-rootfs.service patch-nvm-bdaddr.service || true
+
+# 平板桌面场景没有需要等网络的本机服务/mount，wait-online 在 Wi-Fi 下白等 7s+，禁用之
+systemctl disable NetworkManager-wait-online.service || true
 
 # 编译 system-db:local（screen-keyboard-enabled 等镜像默认值）进 dconf 数据库
 # dconf 由 dconf-cli 提供（构建时已显式安装）；缺失直接失败，避免屏幕键盘等默认值静默丢失

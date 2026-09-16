@@ -132,7 +132,15 @@ fi
 
 # ---------------------------------------------------------------- 网络
 hdr "WiFi (ath11k) / 蓝牙"
-wlan=$(ls -d /sys/class/net/wlan* 2>/dev/null | head -n1)
+# 接口名可能是 wlan0，也可能被 systemd 重命名成 wlP6p1s0 这类 predictable name，
+# 因此按 /sys/class/net/*/wireless 是否存在来判断，而不是匹配 wlan* 前缀
+wlan=""
+for d in /sys/class/net/*; do
+    if [[ -d "$d/wireless" ]]; then
+        wlan="$d"
+        break
+    fi
+done
 if [[ -n "$wlan" ]]; then
     ok "wlan 接口存在（$(basename "$wlan"), $(cat "$wlan/operstate")）"
 else

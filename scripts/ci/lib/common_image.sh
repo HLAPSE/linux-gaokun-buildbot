@@ -45,17 +45,18 @@ install_common_image_assets() {
     "$rootfs_dir/usr/share/applications" \
     "$rootfs_dir/usr/local/share/gaokun"
 
-  sudo cp -a "$gaokun_dir/tools/image-assets/etc/modules-load.d/." \
+  # --no-preserve=ownership：仓库检出目录属于 CI runner 用户，直接 cp -a 会把该 uid 带进镜像
+  sudo cp -a --no-preserve=ownership "$gaokun_dir/tools/image-assets/etc/modules-load.d/." \
     "$rootfs_dir/etc/modules-load.d/"
-  sudo cp -a "$gaokun_dir/tools/image-assets/etc/modprobe.d/." \
+  sudo cp -a --no-preserve=ownership "$gaokun_dir/tools/image-assets/etc/modprobe.d/." \
     "$rootfs_dir/etc/modprobe.d/"
-  sudo cp -a "$gaokun_dir/tools/image-assets/etc/profile.d/." \
+  sudo cp -a --no-preserve=ownership "$gaokun_dir/tools/image-assets/etc/profile.d/." \
     "$rootfs_dir/etc/profile.d/"
-  sudo cp -a "$gaokun_dir/tools/image-assets/etc/xdg/autostart/." \
+  sudo cp -a --no-preserve=ownership "$gaokun_dir/tools/image-assets/etc/xdg/autostart/." \
     "$rootfs_dir/etc/xdg/autostart/"
-  sudo cp -a "$gaokun_dir/tools/image-assets/etc/xdg/fcitx5/." \
+  sudo cp -a --no-preserve=ownership "$gaokun_dir/tools/image-assets/etc/xdg/fcitx5/." \
     "$rootfs_dir/etc/xdg/fcitx5/"
-  sudo cp -a "$gaokun_dir/tools/image-assets/etc/dconf/db/local.d/." \
+  sudo cp -a --no-preserve=ownership "$gaokun_dir/tools/image-assets/etc/dconf/db/local.d/." \
     "$rootfs_dir/etc/dconf/db/local.d/"
 
   for asset in "${executable_assets[@]}"; do
