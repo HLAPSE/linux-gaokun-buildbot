@@ -32,8 +32,6 @@ install_common_image_assets() {
   sudo mkdir -p \
     "$rootfs_dir/etc/modules-load.d" \
     "$rootfs_dir/etc/modprobe.d" \
-    "$rootfs_dir/etc/profile.d" \
-    "$rootfs_dir/etc/xdg/autostart" \
     "$rootfs_dir/etc/dconf/db/local.d" \
     "$rootfs_dir/etc/dconf/profile" \
     "$rootfs_dir/etc/udev/rules.d" \
@@ -50,10 +48,6 @@ install_common_image_assets() {
     "$rootfs_dir/etc/modules-load.d/"
   sudo cp -a --no-preserve=ownership "$gaokun_dir/tools/image-assets/etc/modprobe.d/." \
     "$rootfs_dir/etc/modprobe.d/"
-  sudo cp -a --no-preserve=ownership "$gaokun_dir/tools/image-assets/etc/profile.d/." \
-    "$rootfs_dir/etc/profile.d/"
-  sudo cp -a --no-preserve=ownership "$gaokun_dir/tools/image-assets/etc/xdg/autostart/." \
-    "$rootfs_dir/etc/xdg/autostart/"
   sudo cp -a --no-preserve=ownership "$gaokun_dir/tools/image-assets/etc/dconf/db/local.d/." \
     "$rootfs_dir/etc/dconf/db/local.d/"
   # dconf 默认 profile：不装这个文件 dconf 找不到 system-db:local，
