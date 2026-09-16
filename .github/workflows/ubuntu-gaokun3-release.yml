@@ -10,7 +10,7 @@ on:
       kernel_tag:
         description: Linux kernel tag
         required: true
-        default: "v7.2-rc2"
+        default: "v7.2.5"
       desktop_environment:
         description: Desktop environment metapackage
         required: true
@@ -18,7 +18,7 @@ on:
       extra_packages:
         description: Extra packages to install (space-separated)
         required: true
-        default: "language-pack-gnome-zh-hans fcitx5-chinese-addons gnome-tweaks gnome-shell-extension-manager mpv v4l-utils vim nano ripgrep git htop rsync mutter screen firefox"
+        default: "language-pack-gnome-zh-hans fcitx5-chinese-addons fcitx5-frontend-gtk3 fcitx5-frontend-gtk4 fcitx5-frontend-qt5 fcitx5-frontend-qt6 gdebi gnome-tweaks gnome-shell-extension-manager mpv v4l-utils vim nano ripgrep git htop rsync mutter screen firefox systemd-zram-generator cloud-guest-utils"
       build_el2:
         description: Build and include optional -gaokun3-el2 kernel and EL2 EFI payloads
         required: true
@@ -245,6 +245,9 @@ jobs:
               xz-utils unzip zip bzip2 zstd p7zip-full \
               wget curl ca-certificates gnupg lsb-release \
               ssh less file sudo
+
+            # dconf-cli: required by the image configuration step (dconf update writes screen-keyboard defaults)
+            apt-get install -y dconf-cli
 
             install -d -m 0755 /etc/apt/keyrings
             wget -qO- https://packages.mozilla.org/apt/repo-signing-key.gpg | \

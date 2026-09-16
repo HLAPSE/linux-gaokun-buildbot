@@ -10,7 +10,7 @@ on:
       kernel_tag:
         description: Linux kernel tag
         required: true
-        default: "v7.2-rc2"
+        default: "v7.2.5"
       desktop_environment:
         description: Desktop environment package group (single package or group)
         required: true
@@ -22,7 +22,7 @@ on:
       extra_packages:
         description: Extra packages to install (space-separated)
         required: true
-        default: "fcitx5-chinese-addons gnome-tweaks gnome-extensions-app telnet mpv v4l-utils vim nano ripgrep git htop fastfetch screen firefox"
+        default: "fcitx5-chinese-addons fcitx5-gtk fcitx5-qt gnome-tweaks gnome-extensions-app telnet mpv v4l-utils vim nano ripgrep git htop fastfetch screen firefox zram-generator cloud-utils-growpart"
       build_el2:
         description: Build and include optional -gaokun3-el2 kernel and EL2 EFI payloads
         required: true
@@ -203,6 +203,7 @@ jobs:
 
               mkdir -p "'"$ROOTFS_DIR"'/etc"
 
+              # dconf 供后续镜像配置步骤使用（dconf update 把屏幕键盘等默认值写入数据库）
               dnf -y --installroot="'"$ROOTFS_DIR"'" --releasever="'"$FEDORA_RELEASE"'" --forcearch=aarch64 --use-host-config \
                 --exclude="'"$EXCLUDED_PACKAGES"'" \
                 install \
@@ -210,7 +211,7 @@ jobs:
                 systemd-boot-unsigned alsa-ucm \
                 langpacks-en langpacks-zh_CN \
                 google-noto-color-emoji-fonts google-noto-emoji-fonts \
-                alsa-utils pipewire-utils \
+                alsa-utils pipewire-utils dconf \
                 '"$EXTRA_PACKAGES"'
 
               dnf -y --installroot="'"$ROOTFS_DIR"'" --releasever="'"$FEDORA_RELEASE"'" --forcearch=aarch64 --use-host-config \
