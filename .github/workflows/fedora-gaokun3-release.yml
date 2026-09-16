@@ -22,7 +22,7 @@ on:
       extra_packages:
         description: Extra packages to install (space-separated)
         required: true
-        default: "fcitx5-chinese-addons fcitx5-gtk3 fcitx5-gtk4 fcitx5-qt5 fcitx5-qt6 gnome-tweaks gnome-extensions-app telnet mpv v4l-utils vim nano ripgrep git htop fastfetch screen firefox"
+        default: "fcitx5-chinese-addons fcitx5-gtk3 fcitx5-gtk4 fcitx5-qt5 fcitx5-qt6 gnome-tweaks gnome-extensions-app telnet mpv v4l-utils vim nano ripgrep git htop fastfetch screen firefox zram-generator"
       build_el2:
         description: Build and include optional -gaokun3-el2 kernel and EL2 EFI payloads
         required: true
