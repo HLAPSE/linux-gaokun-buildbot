@@ -161,7 +161,7 @@ sudo dnf --installroot=$ROOTFS_DIR --releasever=44 --forcearch=aarch64 --use-hos
     --exclude=gnome-boxes,gnome-connections,snapshot,gnome-weather,gnome-contacts,gnome-maps,simple-scan,gnome-clocks,gnome-calculator,gnome-calendar,amd-gpu-firmware,intel-gpu-firmware,linux-firmware,nvidia-gpu-firmware,toolbox,unoconv,mediawriter \
     install \
     @gnome-desktop @workstation-product \
-    fcitx5-chinese-addons fcitx5-gtk fcitx5-qt \
+    ibus-libpinyin \
     dconf \
     google-noto-sans-cjk-fonts gnome-tweaks gnome-extensions-app telnet mpv v4l-utils vim nano ripgrep git htop fastfetch screen firefox
 
@@ -441,24 +441,25 @@ exit
 - Fedora 44 的 `90-loaderentry.install` 会从 `/usr/lib/modules/<kernel-release>/dtb/` 查找设备树，所以 DTB 必须放到这个标准路径里。
 - Fedora 默认的 `51-dracut-rescue.install` 会额外生成 `0-rescue` 启动项，但这个救援项默认不带 `devicetree`，在 gaokun3 上不可用，因此这里显式将其禁用。
 
-### 中文输入法（fcitx5）预设
+### 中文输入法（GNOME 原生 ibus + 屏幕键盘）预设
 
-本镜像针对「纯触屏输入中文」这一场景，内置了 fcitx5 输入法相关的默认配置，均为用户态，不涉及内核，与 Ubuntu 构建通用：
+本镜像针对「纯触屏输入中文」这一场景，内置了以下默认配置，均为用户态，不涉及内核，与 Ubuntu 构建通用：
 
 - **CJK 字体**：安装 `google-noto-sans-cjk-fonts`，保证中文候选/界面不出现方框方块。
-- **输入法环境变量**：`/etc/profile.d/fcitx5.sh` 写入 `XMODIFIERS=@im=fcitx`、`GTK_IM_MODULE=fcitx`、`QT_IM_MODULE=fcitx`（已有值时尊重用户配置）。
-- **开机自启**：`/etc/xdg/autostart/fcitx5.desktop` 让 fcitx5 随桌面一起启动。
-- **默认拼音**：`/etc/xdg/fcitx5/profile` 让新用户默认即启用「美式键盘 + 拼音」。
-- **屏幕键盘**：`/etc/dconf/db/local.d/00-screen-keyboard` 设 `screen-keyboard-enabled=true`，桌面会话下屏幕键盘默认开启。
+- **中文输入**：走 GNOME 原生 ibus，`/etc/dconf/db/local.d/01-input-sources` 把输入源预设为「美式键盘 + 智能拼音（libpinyin）」，`ibus-libpinyin` 已在包清单中。Super+空格 切换中英文。
+- **屏幕键盘**：`/etc/dconf/db/local.d/00-screen-keyboard` 设 `screen-keyboard-enabled=true`，触摸屏点按输入框自动弹出。
+- **dconf 默认 profile**：`/etc/dconf/profile/user`（`user-db:user` + `system-db:local`）。缺少该文件时 dconf 找不到 system 库，上述默认值会全部静默失效。
 
-手动构建时，把上述 4 个小文件按路径放进 `$ROOTFS_DIR`，并在「第 4 步 chroot 初始化」末尾补一行使其生效：
+> **为什么不用 fcitx5**：GNOME Wayland 下屏幕键盘依赖 Shell 的 text-input→ibus 链路；`GTK_IM_MODULE=fcitx` 会让应用绕开该协议直连 fcitx5，且 fcitx5 的 ibus 兼容前端会抢注 `org.freedesktop.IBus` 总线名，两者都会导致触摸呼不出屏幕键盘（Ubuntu 构建上实测已验证）。
+
+手动构建时，把上述 3 个小文件按路径放进 `$ROOTFS_DIR`，并在「第 4 步 chroot 初始化」末尾补一行使其生效：
 
 ```bash
 # dconf 已包含在第三步的包清单中；若提示 command not found，说明漏装了
 dconf update
 ```
 
-> 候选面板的字号/每页个数属于 fcitx5 外观主题（依赖已安装的主题），默认不强改。若触屏点候选偏小，首启后在「fcitx5 设置 → 外观」里调大字号、减少每页候选数。
+> 候选面板的字号等外观项可在「设置 → 键盘 → 输入源」及 ibus 设置里按需调整。
 
 ### 触屏驱动鸣谢
 

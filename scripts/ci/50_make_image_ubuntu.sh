@@ -128,24 +128,11 @@ systemctl enable gdm NetworkManager ssh \
 # 平板桌面场景没有需要等网络的本机服务/mount，wait-online 在 Wi-Fi 下白等 7s+，禁用之
 systemctl disable NetworkManager-wait-online.service || true
 
-# 编译 system-db:local（screen-keyboard-enabled 等镜像默认值）进 dconf 数据库
+# 编译 system-db:local（screen-keyboard-enabled / 输入源默认值）进 dconf 数据库
 # dconf 由 dconf-cli 提供（构建时已显式安装）；缺失直接失败，避免屏幕键盘等默认值静默丢失
+# 中文输入走 GNOME 原生 ibus + libpinyin（屏幕键盘依赖 Shell 的 ibus/text-input 链路，fcitx5 会使其失效）
 command -v dconf >/dev/null 2>&1 || { echo "ERROR: dconf not available in chroot (install dconf-cli)" >&2; exit 1; }
 dconf update
-
-# 若构建时未安装 fcitx5（如清空了 extra_packages），同步移除自启动项与输入法预设，避免留下失效配置
-if ! command -v fcitx5 >/dev/null 2>&1; then
-  rm -f /etc/xdg/autostart/fcitx5.desktop /etc/xdg/fcitx5/profile /etc/profile.d/fcitx5.sh
-fi
-
-# 双击 .deb 用图形安装器打开（gdebi 的桌面文件名视版本而定）
-for _f in gdebi.desktop gdebi-gtk.desktop; do
-  if [[ -f "/usr/share/applications/$_f" ]]; then
-    install -d -m 0755 /etc/xdg
-    printf '[Default Applications]\napplication/vnd.debian.binary-package=%s\n' "$_f" > /etc/xdg/mimeapps.list
-    break
-  fi
-done
 
 # 时区：中国区默认 Asia/Shanghai（chroot 内 timedatectl 不可用，用符号链接 + tz 文件）
 ln -sf /usr/share/zoneinfo/Asia/Shanghai /etc/localtime

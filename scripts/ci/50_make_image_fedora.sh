@@ -126,11 +126,6 @@ systemctl disable NetworkManager-wait-online.service || true
 command -v dconf >/dev/null 2>&1 || { echo "ERROR: dconf not available in chroot (install dconf)" >&2; exit 1; }
 dconf update
 
-# 若构建时未安装 fcitx5（如清空了 extra_packages），同步移除自启动项与输入法预设，避免留下失效配置
-if ! command -v fcitx5 >/dev/null 2>&1; then
-  rm -f /etc/xdg/autostart/fcitx5.desktop /etc/xdg/fcitx5/profile /etc/profile.d/fcitx5.sh
-fi
-
 # 双击 .rpm 用 GNOME Software 打开
 if [[ -f /usr/share/applications/org.gnome.Software.desktop ]]; then
   install -d -m 0755 /etc/xdg

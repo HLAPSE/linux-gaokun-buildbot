@@ -161,7 +161,7 @@ sudo dnf --installroot=$ROOTFS_DIR --releasever=44 --forcearch=aarch64 --use-hos
     --exclude=gnome-boxes,gnome-connections,snapshot,gnome-weather,gnome-contacts,gnome-maps,simple-scan,gnome-clocks,gnome-calculator,gnome-calendar,amd-gpu-firmware,intel-gpu-firmware,linux-firmware,nvidia-gpu-firmware,toolbox,unoconv,mediawriter \
     install \
     @gnome-desktop @workstation-product \
-    fcitx5-chinese-addons fcitx5-gtk fcitx5-qt \
+    ibus-libpinyin \
     dconf \
     google-noto-sans-cjk-fonts gnome-tweaks gnome-extensions-app telnet mpv v4l-utils vim nano ripgrep git htop fastfetch screen firefox
 
@@ -441,24 +441,25 @@ Notes:
 - Fedora 44's `90-loaderentry.install` looks for device tree from `/usr/lib/modules/<kernel-release>/dtb/`, so DTB must be placed in this standard path.
 - Fedora's default `51-dracut-rescue.install` generates an additional `0-rescue` boot entry, but this rescue entry doesn't include `devicetree` by default and is unusable on gaokun3, so it's explicitly disabled here.
 
-### Chinese Input Method (fcitx5) Presets
+### Chinese Input Method (GNOME native ibus + on-screen keyboard) Presets
 
-Targeting the "touch-only Chinese input" scenario on this device, the image ships default fcitx5 configurations. All are user-space and kernel-independent, shared between Ubuntu and Fedora builds:
+Targeting the "touch-only Chinese input" scenario on this device, the image ships the following defaults. All are user-space and kernel-independent, shared between Ubuntu and Fedora builds:
 
 - **CJK fonts**: `google-noto-sans-cjk-fonts` so Chinese candidates/UI never render as boxes.
-- **Input method environment variables**: `/etc/profile.d/fcitx5.sh` sets `XMODIFIERS=@im=fcitx`, `GTK_IM_MODULE=fcitx`, `QT_IM_MODULE=fcitx` (existing values are respected).
-- **Autostart**: `/etc/xdg/autostart/fcitx5.desktop` starts fcitx5 with the desktop session.
-- **Default Pinyin**: `/etc/xdg/fcitx5/profile` enables "US keyboard + Pinyin" by default for new users.
-- **On-screen keyboard**: `/etc/dconf/db/local.d/00-screen-keyboard` sets `screen-keyboard-enabled=true`, so the on-screen keyboard is enabled by default in desktop sessions.
+- **Chinese input**: native GNOME ibus — `/etc/dconf/db/local.d/01-input-sources` presets the input sources to "US keyboard + Intelligent Pinyin (libpinyin)"; `ibus-libpinyin` is in the package list. Switch languages with Super+Space.
+- **On-screen keyboard**: `/etc/dconf/db/local.d/00-screen-keyboard` sets `screen-keyboard-enabled=true`, so tapping a text field with the touchscreen brings up the OSK.
+- **dconf default profile**: `/etc/dconf/profile/user` (`user-db:user` + `system-db:local`). Without this file dconf cannot find the system database and all the defaults above silently fail.
 
-For manual builds, place the 4 small files above into `$ROOTFS_DIR` at their paths, and append the following at the end of "Step 4 chroot initialization" to make them take effect:
+> **Why not fcitx5**: under GNOME Wayland the OSK depends on the Shell's text-input→ibus chain. `GTK_IM_MODULE=fcitx` makes apps bypass that protocol and talk to fcitx5 directly, and fcitx5's ibus compatibility frontend grabs the `org.freedesktop.IBus` bus name — either breaks touch-triggered OSK (verified on the Ubuntu build).
+
+For manual builds, place the 3 small files above into `$ROOTFS_DIR` at their paths, and append the following at the end of "Step 4 chroot initialization" to make them take effect:
 
 ```bash
 # dconf is included in the Step 3 package list; a "command not found" means it was missed
 dconf update
 ```
 
-> Candidate font size / candidates per page belong to the fcitx5 theme (depends on installed themes) and are not force-changed by default. If touch targets feel small, enlarge the font and reduce candidates per page in "fcitx5 Settings → Appearance" after first boot.
+> Candidate panel appearance can be adjusted per user in "Settings → Keyboard → Input Sources" and the ibus settings after first boot.
 
 ### Touchscreen Driver Acknowledgments
 
