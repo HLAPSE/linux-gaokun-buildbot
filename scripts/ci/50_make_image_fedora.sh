@@ -105,8 +105,37 @@ install -d -m 0755 /home/user/.config
 install -Dm644 /usr/local/share/gaokun/monitors.xml /home/user/.config/monitors.xml
 chown -R user:user /home/user
 
+# GDM 自动登录：平板形态 + 补丁测试场景（触屏失效时无需键盘输密码）
+# 如需关闭，注释掉下面两行 AutomaticLogin 即可
+cat > /etc/gdm/custom.conf <<'EOF'
+[daemon]
+AutomaticLoginEnable=True
+AutomaticLogin=user
+EOF
+
 systemctl enable gdm NetworkManager sshd \
-  gdm-monitor-sync.service patch-nvm-bdaddr.service || true
+  gdm-monitor-sync.service gaokun-grow-rootfs.service \
+  patch-nvm-bdaddr.service || true
+
+# 编译 system-db:local（screen-keyboard-enabled 等镜像默认值）进 dconf 数据库
+# dconf 由 dconf 包提供（构建时已显式安装）；缺失直接失败，避免屏幕键盘等默认值静默丢失
+command -v dconf >/dev/null 2>&1 || { echo "ERROR: dconf not available in chroot (install dconf)" >&2; exit 1; }
+dconf update
+
+# 若构建时未安装 fcitx5（如清空了 extra_packages），同步移除自启动项与输入法预设，避免留下失效配置
+if ! command -v fcitx5 >/dev/null 2>&1; then
+  rm -f /etc/xdg/autostart/fcitx5.desktop /etc/xdg/fcitx5/profile /etc/profile.d/fcitx5.sh
+fi
+
+# 双击 .rpm 用 GNOME Software 打开
+if [[ -f /usr/share/applications/org.gnome.Software.desktop ]]; then
+  install -d -m 0755 /etc/xdg
+  printf '[Default Applications]\napplication/x-rpm=org.gnome.Software.desktop\n' > /etc/xdg/mimeapps.list
+fi
+
+# 时区：中国区默认 Asia/Shanghai（chroot 内 timedatectl 不可用，用符号链接；
+# /etc/timezone 是 Debian 系专属文件，Fedora 不读取，无需写入）
+ln -sf /usr/share/zoneinfo/Asia/Shanghai /etc/localtime
 
 cat > /etc/dracut.conf.d/matebook.conf <<'MODEOF'
 hostonly="no"
@@ -122,7 +151,7 @@ install -d /etc/kernel/install.d
 ln -sf /dev/null /etc/kernel/install.d/51-dracut-rescue.install
 
 cat > /etc/kernel/cmdline <<EOF
-root=UUID=$ROOT_UUID rootflags=subvol=@ clk_ignore_unused pd_ignore_unused arm64.nopauth iommu.passthrough=0 iommu.strict=0 pcie_aspm.policy=powersupersave efi=noruntime fbcon=rotate:1 usbhid.quirks=0x12d1:0x10b8:0x20000000 consoleblank=0 loglevel=4 psi=1
+root=UUID=$ROOT_UUID rootflags=subvol=@ clk_ignore_unused pd_ignore_unused arm64.nopauth iommu.passthrough=0 iommu.strict=0 pcie_aspm.policy=powersupersave efi=noruntime fbcon=rotate:1 usbcore.autosuspend=-1 usbhid.quirks=0x12d1:0x10b8:0x20000000 consoleblank=0 loglevel=4 psi=1
 EOF
 
 cat > /etc/kernel/devicetree <<'EOF'

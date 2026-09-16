@@ -1,0 +1,13 @@
+[Unit]
+Description=Grow root partition/filesystem to available space after install
+Documentation=https://github.com/HLAPSE/linux-gaokun-buildbot/blob/main/docs/dual_boot_guide_zh.md
+After=local-fs.target
+ConditionPathExists=/usr/local/bin/gaokun-grow-rootfs
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/bin/gaokun-grow-rootfs
+StandardOutput=journal+console
+
+[Install]
+WantedBy=multi-user.target

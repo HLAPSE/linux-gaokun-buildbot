@@ -1,0 +1,10 @@
+[Desktop Entry]
+Type=Application
+Name=Install to internal disk
+Name[zh_CN]=安装系统到内置硬盘
+Comment=Clone the running USB system to the internal disk (erases all data on it)
+Comment[zh_CN]=将当前 U 盘系统整盘克隆到内置硬盘（目标盘数据将被清空）
+Exec=sudo /usr/local/bin/gaokun-install
+Terminal=true
+Icon=drive-harddisk
+Categories=System;
