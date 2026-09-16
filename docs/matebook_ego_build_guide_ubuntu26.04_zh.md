@@ -225,6 +225,10 @@ apt-get install -y \
     fonts-noto-cjk \
     fonts-noto-color-emoji \
     fcitx5-chinese-addons \
+    fcitx5-frontend-gtk3 fcitx5-frontend-gtk4 \
+    fcitx5-frontend-qt5 fcitx5-frontend-qt6 \
+    gdebi \
+    dconf-cli \
     gnome-tweaks gnome-shell-extension-manager \
     mpv v4l-utils vim nano ripgrep git htop screen \
     alsa-utils pipewire-alsa \
@@ -527,6 +531,25 @@ exit
 - 默认使用 `--entry-token=machine-id`，所以最终条目文件名会是 `/boot/efi/loader/entries/<machine-id>-<kernel-release>.conf`。
 - 内核、`initrd` 和 DTB 会自动复制到 `/boot/efi/<machine-id>/<kernel-release>/` 下；这正是 BLS Type #1 的标准目录布局。
 
+### 中文输入法（fcitx5）预设
+
+本镜像针对「纯触屏输入中文」这一场景，内置了 fcitx5 输入法相关的默认配置，均为用户态，不涉及内核，与 Fedora 构建通用：
+
+- **CJK 字体**：安装 `fonts-noto-cjk`（已在基础包清单中），保证中文候选/界面不出现方框方块。
+- **输入法环境变量**：`/etc/profile.d/fcitx5.sh` 写入 `XMODIFIERS=@im=fcitx`、`GTK_IM_MODULE=fcitx`、`QT_IM_MODULE=fcitx`（已有值时尊重用户配置）。
+- **开机自启**：`/etc/xdg/autostart/fcitx5.desktop` 让 fcitx5 随桌面一起启动。
+- **默认拼音**：`/etc/xdg/fcitx5/profile` 让新用户默认即启用「美式键盘 + 拼音」。
+- **屏幕键盘**：`/etc/dconf/db/local.d/00-screen-keyboard` 设 `screen-keyboard-enabled=true`，桌面会话下屏幕键盘默认开启。
+
+手动构建时，把上述 4 个小文件按路径放进 `$ROOTFS_DIR`，并在「第 4 步 chroot 初始化」末尾补一行使其生效：
+
+```bash
+# dconf-cli 已包含在第三步的包清单中；若提示 command not found，说明漏装了
+dconf update
+```
+
+> 候选面板的字号/每页个数属于 fcitx5 外观主题（依赖已安装的主题），默认不强改。若触屏点候选偏小，首启后在「fcitx5 设置 → 外观」里调大字号、减少每页候选数。
+
 ### 4. 收尾清理
 
 ```bash
@@ -542,3 +565,4 @@ sudo losetup -d $LOOP
 - 双系统覆盖 EFI 的方式请参考 [dual_boot_guide_zh.md](dual_boot_guide_zh.md)
 - 如果在本指南中同时构建了 `-gaokun3-el2` 内核变体，产出的镜像就已经具备 EL2 支持。
 - 有关实现细节、启动链结构和排障说明，请参考 [el2_kvm_guide_zh.md](el2_kvm_guide_zh.md)
+- CI 流水线产出的镜像默认带 `user` 账号（密码同为 `user`，且免密 sudo），首次启动后请尽快执行 `passwd` 修改密码。

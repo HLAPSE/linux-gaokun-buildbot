@@ -161,7 +161,9 @@ sudo dnf --installroot=$ROOTFS_DIR --releasever=44 --forcearch=aarch64 --use-hos
     --exclude=gnome-boxes,gnome-connections,snapshot,gnome-weather,gnome-contacts,gnome-maps,simple-scan,gnome-clocks,gnome-calculator,gnome-calendar,amd-gpu-firmware,intel-gpu-firmware,linux-firmware,nvidia-gpu-firmware,toolbox,unoconv,mediawriter \
     install \
     @gnome-desktop @workstation-product \
-    fcitx5-chinese-addons gnome-tweaks gnome-extensions-app telnet mpv v4l-utils vim nano ripgrep git htop fastfetch screen firefox
+    fcitx5-chinese-addons fcitx5-gtk fcitx5-qt \
+    dconf \
+    google-noto-sans-cjk-fonts gnome-tweaks gnome-extensions-app telnet mpv v4l-utils vim nano ripgrep git htop fastfetch screen firefox
 
 # Install RPMFusion and add libavcodec-freeworld (hardware video decoding support)
 sudo dnf --installroot=$ROOTFS_DIR --releasever=44 --forcearch=aarch64 --use-host-config -y \
@@ -175,6 +177,7 @@ sudo dnf --installroot=$ROOTFS_DIR --releasever=44 --forcearch=aarch64 --use-hos
     --setopt=reposdir="$ROOTFS_DIR/etc/yum.repos.d,/etc/yum.repos.d" \
     install \
     libavcodec-freeworld
+
 ```
 
 Install kernel, modules, firmware and local tools:
@@ -435,6 +438,25 @@ Notes:
 - Fedora 44's `90-loaderentry.install` looks for device tree from `/usr/lib/modules/<kernel-release>/dtb/`, so DTB must be placed in this standard path.
 - Fedora's default `51-dracut-rescue.install` generates an additional `0-rescue` boot entry, but this rescue entry doesn't include `devicetree` by default and is unusable on gaokun3, so it's explicitly disabled here.
 
+### Chinese Input Method (fcitx5) Presets
+
+Targeting the "touch-only Chinese input" scenario on this device, the image ships default fcitx5 configurations. All are user-space and kernel-independent, shared between Ubuntu and Fedora builds:
+
+- **CJK fonts**: `google-noto-sans-cjk-fonts` so Chinese candidates/UI never render as boxes.
+- **Input method environment variables**: `/etc/profile.d/fcitx5.sh` sets `XMODIFIERS=@im=fcitx`, `GTK_IM_MODULE=fcitx`, `QT_IM_MODULE=fcitx` (existing values are respected).
+- **Autostart**: `/etc/xdg/autostart/fcitx5.desktop` starts fcitx5 with the desktop session.
+- **Default Pinyin**: `/etc/xdg/fcitx5/profile` enables "US keyboard + Pinyin" by default for new users.
+- **On-screen keyboard**: `/etc/dconf/db/local.d/00-screen-keyboard` sets `screen-keyboard-enabled=true`, so the on-screen keyboard is enabled by default in desktop sessions.
+
+For manual builds, place the 4 small files above into `$ROOTFS_DIR` at their paths, and append the following at the end of "Step 4 chroot initialization" to make them take effect:
+
+```bash
+# dconf is included in the Step 3 package list; a "command not found" means it was missed
+dconf update
+```
+
+> Candidate font size / candidates per page belong to the fcitx5 theme (depends on installed themes) and are not force-changed by default. If touch targets feel small, enlarge the font and reduce candidates per page in "fcitx5 Settings → Appearance" after first boot.
+
 ### Touchscreen Driver Acknowledgments
 
 - [chiyuki0325/EGoTouchRev-Linux](https://github.com/chiyuki0325/EGoTouchRev-Linux): The source and main upstream reference for the directly integrated `himax_hx83121a_spi` touchscreen driver and tuning algorithm in this repository.
@@ -455,3 +477,4 @@ sudo losetup -d $LOOP
 - For dual boot EFI overlay method, refer to [dual_boot_guide_en.md](dual_boot_guide_en.md)
 - EL2 support is already included when you also build the `-gaokun3-el2` kernel variant in this guide.
 - Refer to [el2_kvm_guide_en.md](el2_kvm_guide_en.md) for implementation details, boot-chain structure, and debugging notes.
+- CI-built images ship a default `user` account (password `user`, passwordless sudo); change the password with `passwd` soon after first boot.
