@@ -216,7 +216,9 @@ Pin: origin packages.mozilla.org
 Pin-Priority: 1000
 EOF
 
-# Switch system sources to Tsinghua TUNA mirror (aarch64 uses ubuntu-ports) for faster downloads in China.
+# [Optional, recommended only for local builds inside China] Switch system sources to the Tsinghua TUNA
+# mirror (aarch64 uses ubuntu-ports) for faster downloads. CI no longer does this (no CA certs inside
+# the chroot and the runner is overseas, so official sources are used directly).
 # Match by host, covering both http/https; arm64 only uses ports.ubuntu.com, never map it to the x86 /ubuntu repo
 if ls /etc/apt/sources.list.d/*.sources >/dev/null 2>&1; then
     sed -i -e 's#http://ports.ubuntu.com/ubuntu-ports#https://mirrors.tuna.tsinghua.edu.cn/ubuntu-ports#g' \
