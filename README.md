@@ -38,11 +38,12 @@ The package pipeline builds and installs dedicated package sets:
 
 ### Patch Sources
 
-- `upstream/*` and `others/0017`: adapted from [right-0903/linux-gaokun](https://github.com/right-0903/linux-gaokun) for the base SC8280XP / gaokun3 enablement, display bring-up, EC suspend/resume, ADSP FastRPC, and DSI stability work
+- `upstream/*` and `others/0006`: adapted from [right-0903/linux-gaokun](https://github.com/right-0903/linux-gaokun) for the base SC8280XP / gaokun3 enablement, display bring-up, EC suspend/resume, and DSI stability work
 - `others/0001`: adapted from [whitelewi1-ctrl/matebook-e-go-linux](https://github.com/whitelewi1-ctrl/matebook-e-go-linux) to avoid setting `USE_BDADDR_PROPERTY` when the adapter address is invalid
 - `others/0002`: local change in this repository to enable DSC and allow 60 Hz / 120 Hz switching
 - `others/0003`: adapted from [chiyuki0325/EGoTouchRev-Linux](https://github.com/chiyuki0325/EGoTouchRev-Linux) to add the Himax HX83121A SPI touchscreen driver
-- `others/0004`: adapted from [TheUnknownThing/linux-gaokun](https://github.com/TheUnknownThing/linux-gaokun) to improve UCSI handling and module wiring for the Type-C path
+- `others/0004`: local change in this repository to fix DPU video timing width truncation when DSC is enabled
+- `others/0005`: adapted from [right-0903/linux-gaokun](https://github.com/right-0903/linux-gaokun) to add backlight regulator supply for the HX83121A panel driver
 - `media/*`: adapted from the [jhovold/linux](https://github.com/jhovold/linux/commits/wip/sc8280xp-6.16) to add SC8280XP Venus support
 - `0099`: local patch in this repository to import the current DTS files and `gaokun3_defconfig`
 - **[Optional]** `el2/*`: adapted from [TravMurav/linux](https://github.com/TravMurav/linux/tree/x13s-6.18-v1.1-cxsd) for the EL2 boot path, including SMP2P handover, remoteproc attach/restart flow, SCM/SHM owner handling, and related rpmsg/QRTR/pmic_glink stability fixes
