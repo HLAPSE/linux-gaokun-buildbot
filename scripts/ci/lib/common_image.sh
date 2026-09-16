@@ -10,6 +10,7 @@ install_common_image_assets() {
     "tools/touchscreen-tuner/touchscreen-tune:/usr/local/bin/touchscreen-tune"
     "tools/hwcheck/gaokun-check:/usr/local/bin/gaokun-check"
     "tools/growroot/gaokun-grow-rootfs:/usr/local/bin/gaokun-grow-rootfs"
+    "tools/installer/gaokun-install:/usr/local/bin/gaokun-install"
   )
   local service_assets=(
     "tools/bluetooth/patch-nvm-bdaddr.service:/etc/systemd/system/patch-nvm-bdaddr.service"
@@ -24,6 +25,7 @@ install_common_image_assets() {
     "tools/image-assets/usr/local/share/gaokun/monitors.xml:/usr/local/share/gaokun/monitors.xml"
     "tools/image-assets/etc/systemd/zram-generator.conf:/etc/systemd/zram-generator.conf"
     "tools/image-assets/etc/systemd/journald.conf.d/90-gaokun.conf:/etc/systemd/journald.conf.d/90-gaokun.conf"
+    "tools/installer/gaokun-install.desktop:/usr/share/applications/gaokun-install.desktop"
   )
   local asset src dest
 
