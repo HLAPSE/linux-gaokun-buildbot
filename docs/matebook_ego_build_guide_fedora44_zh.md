@@ -370,20 +370,11 @@ cat > /etc/kernel/cmdline <<EOF
 root=UUID=${ROOT_UUID} rootflags=subvol=@ clk_ignore_unused pd_ignore_unused arm64.nopauth iommu.passthrough=0 iommu.strict=0 pcie_aspm.policy=powersupersave efi=noruntime fbcon=rotate:1 usbhid.quirks=0x12d1:0x10b8:0x20000000 consoleblank=0 loglevel=4 psi=1
 EOF
 
-cat > /etc/kernel/devicetree <<EOF
-qcom/sc8280xp-huawei-gaokun3.dtb
-EOF
-
 systemctl enable gdm-monitor-sync.service \
     patch-nvm-bdaddr.service
 
 # 桌面场景无需等待网络就绪，Wi-Fi 下该服务会白等 7s 以上
 systemctl disable NetworkManager-wait-online.service || true
-
-dracut --force --kver $KREL
-if [ -n "$KREL_EL2" ]; then
-    dracut --force --kver $KREL_EL2
-fi
 
 rm -f /etc/machine-id
 systemd-machine-id-setup
@@ -391,27 +382,36 @@ MACHINE_ID=$(cat /etc/machine-id)
 
 bootctl --no-variables --esp-path=/boot/efi install
 
-kernel-install --make-entry-directory=yes --entry-token=machine-id add \
-    $KREL /boot/vmlinuz-$KREL
+# /etc/kernel/{install.conf,cmdline,devicetree} 就是 kernel-install 的默认配置位置：
+# 按内核变体切换 cmdline / devicetree 后，dracut 与 kernel-install 依次复用，
+# 无需再为每次 kernel-install 构造临时 KERNEL_INSTALL_CONF_ROOT 目录
+install_kernel_variant() {
+    local krel="$1"
+    local dtb="$2"
+    local cmdline="$3"
+
+    printf '%s\n' "$cmdline" > /etc/kernel/cmdline
+    printf 'qcom/%s\n' "$dtb" > /etc/kernel/devicetree
+    dracut --force --kver "$krel"
+    kernel-install --entry-token=machine-id remove "$krel" || true
+    kernel-install --make-entry-directory=yes --entry-token=machine-id add \
+        "$krel" "/boot/vmlinuz-$krel"
+}
+
+BASE_CMDLINE=$(cat /etc/kernel/cmdline)
+install_kernel_variant $KREL sc8280xp-huawei-gaokun3.dtb "$BASE_CMDLINE"
 
 if [ -n "$KREL_EL2" ]; then
     mkdir -p /boot/efi/EFI/systemd/drivers
     mkdir -p /boot/efi/firmware/qcom/sc8280xp/HUAWEI/gaokun3
 
-    EL2_CONF_ROOT=$(mktemp -d)
-    cat > $EL2_CONF_ROOT/install.conf <<EOF
-layout=bls
-EOF
-    cat > $EL2_CONF_ROOT/cmdline <<EOF
-root=UUID=${ROOT_UUID} rootflags=subvol=@ clk_ignore_unused pd_ignore_unused arm64.nopauth iommu.passthrough=0 iommu.strict=0 pcie_aspm.policy=powersupersave modprobe.blacklist=simpledrm efi=noruntime fbcon=rotate:1 usbhid.quirks=0x12d1:0x10b8:0x20000000 consoleblank=0 loglevel=4 psi=1
-EOF
-    cat > $EL2_CONF_ROOT/devicetree <<EOF
-qcom/sc8280xp-huawei-gaokun3-el2.dtb
-EOF
-    KERNEL_INSTALL_CONF_ROOT=$EL2_CONF_ROOT \
-        kernel-install --make-entry-directory=yes --entry-token=machine-id add \
-        $KREL_EL2 /boot/vmlinuz-$KREL_EL2
-    rm -rf $EL2_CONF_ROOT
+    install_kernel_variant $KREL_EL2 sc8280xp-huawei-gaokun3-el2.dtb \
+        "${BASE_CMDLINE} modprobe.blacklist=simpledrm"
+
+    # EL2 内核的 BLS 条目生成完毕，把 /etc/kernel 默认值恢复为标准内核的 cmdline / devicetree：
+    # 设备上后续安装新内核时，kernel-install 会复用这里的默认值
+    printf '%s\n' "$BASE_CMDLINE" > /etc/kernel/cmdline
+    printf 'qcom/%s\n' "sc8280xp-huawei-gaokun3.dtb" > /etc/kernel/devicetree
 
     cp $GAOKUN_DIR/tools/el2/slbounceaa64.efi /boot/efi/EFI/systemd/drivers/
     cp $GAOKUN_DIR/tools/el2/qebspilaa64.efi /boot/efi/EFI/systemd/drivers/
@@ -440,6 +440,7 @@ exit
 - 默认使用 `--entry-token=machine-id`，因此条目名会变成 `/boot/efi/loader/entries/<machine-id>-<kernel-release>.conf`。
 - Fedora 44 的 `90-loaderentry.install` 会从 `/usr/lib/modules/<kernel-release>/dtb/` 查找设备树，所以 DTB 必须放到这个标准路径里。
 - Fedora 默认的 `51-dracut-rescue.install` 会额外生成 `0-rescue` 启动项，但这个救援项默认不带 `devicetree`，在 gaokun3 上不可用，因此这里显式将其禁用。
+- EL2 内核安装完成后，`/etc/kernel/{cmdline,devicetree}` 会恢复为标准内核的默认值；设备上后续安装新内核时，`kernel-install` 直接复用这些默认值。
 
 ### 中文输入法（GNOME 原生 ibus + 屏幕键盘）预设
 

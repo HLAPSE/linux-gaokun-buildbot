@@ -370,20 +370,11 @@ cat > /etc/kernel/cmdline <<EOF
 root=UUID=${ROOT_UUID} rootflags=subvol=@ clk_ignore_unused pd_ignore_unused arm64.nopauth iommu.passthrough=0 iommu.strict=0 pcie_aspm.policy=powersupersave efi=noruntime fbcon=rotate:1 usbhid.quirks=0x12d1:0x10b8:0x20000000 consoleblank=0 loglevel=4 psi=1
 EOF
 
-cat > /etc/kernel/devicetree <<EOF
-qcom/sc8280xp-huawei-gaokun3.dtb
-EOF
-
 systemctl enable gdm-monitor-sync.service \
     patch-nvm-bdaddr.service
 
 # Desktop images do not need to block on network being online; this waits 7s+ on Wi-Fi
 systemctl disable NetworkManager-wait-online.service || true
-
-dracut --force --kver $KREL
-if [ -n "$KREL_EL2" ]; then
-    dracut --force --kver $KREL_EL2
-fi
 
 rm -f /etc/machine-id
 systemd-machine-id-setup
@@ -391,27 +382,38 @@ MACHINE_ID=$(cat /etc/machine-id)
 
 bootctl --no-variables --esp-path=/boot/efi install
 
-kernel-install --make-entry-directory=yes --entry-token=machine-id add \
-    $KREL /boot/vmlinuz-$KREL
+# /etc/kernel/{install.conf,cmdline,devicetree} are kernel-install's default config
+# locations: switch the cmdline / devicetree per kernel variant, then dracut and
+# kernel-install reuse them in sequence - no temporary KERNEL_INSTALL_CONF_ROOT
+# directory is needed for each kernel-install invocation
+install_kernel_variant() {
+    local krel="$1"
+    local dtb="$2"
+    local cmdline="$3"
+
+    printf '%s\n' "$cmdline" > /etc/kernel/cmdline
+    printf 'qcom/%s\n' "$dtb" > /etc/kernel/devicetree
+    dracut --force --kver "$krel"
+    kernel-install --entry-token=machine-id remove "$krel" || true
+    kernel-install --make-entry-directory=yes --entry-token=machine-id add \
+        "$krel" "/boot/vmlinuz-$krel"
+}
+
+BASE_CMDLINE=$(cat /etc/kernel/cmdline)
+install_kernel_variant $KREL sc8280xp-huawei-gaokun3.dtb "$BASE_CMDLINE"
 
 if [ -n "$KREL_EL2" ]; then
     mkdir -p /boot/efi/EFI/systemd/drivers
     mkdir -p /boot/efi/firmware/qcom/sc8280xp/HUAWEI/gaokun3
 
-    EL2_CONF_ROOT=$(mktemp -d)
-    cat > $EL2_CONF_ROOT/install.conf <<EOF
-layout=bls
-EOF
-    cat > $EL2_CONF_ROOT/cmdline <<EOF
-root=UUID=${ROOT_UUID} rootflags=subvol=@ clk_ignore_unused pd_ignore_unused arm64.nopauth iommu.passthrough=0 iommu.strict=0 pcie_aspm.policy=powersupersave modprobe.blacklist=simpledrm efi=noruntime fbcon=rotate:1 usbhid.quirks=0x12d1:0x10b8:0x20000000 consoleblank=0 loglevel=4 psi=1
-EOF
-    cat > $EL2_CONF_ROOT/devicetree <<EOF
-qcom/sc8280xp-huawei-gaokun3-el2.dtb
-EOF
-    KERNEL_INSTALL_CONF_ROOT=$EL2_CONF_ROOT \
-        kernel-install --make-entry-directory=yes --entry-token=machine-id add \
-        $KREL_EL2 /boot/vmlinuz-$KREL_EL2
-    rm -rf $EL2_CONF_ROOT
+    install_kernel_variant $KREL_EL2 sc8280xp-huawei-gaokun3-el2.dtb \
+        "${BASE_CMDLINE} modprobe.blacklist=simpledrm"
+
+    # Once the EL2 kernel's BLS entry is generated, restore /etc/kernel defaults to
+    # the standard kernel's cmdline / devicetree: later kernel installs on the
+    # device reuse these defaults via kernel-install
+    printf '%s\n' "$BASE_CMDLINE" > /etc/kernel/cmdline
+    printf 'qcom/%s\n' "sc8280xp-huawei-gaokun3.dtb" > /etc/kernel/devicetree
 
     cp $GAOKUN_DIR/tools/el2/slbounceaa64.efi /boot/efi/EFI/systemd/drivers/
     cp $GAOKUN_DIR/tools/el2/qebspilaa64.efi /boot/efi/EFI/systemd/drivers/
@@ -440,6 +442,7 @@ Notes:
 - Default uses `--entry-token=machine-id`, so entry names become `/boot/efi/loader/entries/<machine-id>-<kernel-release>.conf`.
 - Fedora 44's `90-loaderentry.install` looks for device tree from `/usr/lib/modules/<kernel-release>/dtb/`, so DTB must be placed in this standard path.
 - Fedora's default `51-dracut-rescue.install` generates an additional `0-rescue` boot entry, but this rescue entry doesn't include `devicetree` by default and is unusable on gaokun3, so it's explicitly disabled here.
+- After the EL2 kernel is installed, `/etc/kernel/{cmdline,devicetree}` are restored to the standard kernel defaults; subsequent kernel installs on the device reuse them via `kernel-install`.
 
 ### Chinese Input Method (GNOME native ibus + on-screen keyboard) Presets
 
