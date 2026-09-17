@@ -56,7 +56,7 @@ Notes:
 
 - After reboot, you should enter the `systemd-boot` boot menu.
 - The menu allows selecting Windows or Linux distribution to boot.
-- After entering the Linux distribution, you can use gnome-disk or other disk tools, or commands like growpart/resize2fs/btrfs to expand the rootfs partition and filesystem to the remaining space.
+- After entering Linux, `gaokun-grow-rootfs.service` automatically grows the rootfs to fill the target partition on first boot (and takes in any free space right after the partition). If it does not kick in, use gnome-disks or run `growpart`/`resize2fs`/`btrfs filesystem resize max /` manually.
 
 ## Additional Notes (EL2 Optional)
 
