@@ -40,7 +40,12 @@ render_template_to_string() {
     shift 2
   done
 
-  sed "${sed_args[@]}" "$template_path"
+  # 无替换项时不能调用 `sed <文件>`：sed 会把文件路径当成脚本内容解析
+  if [[ ${#sed_args[@]} -eq 0 ]]; then
+    cat "$template_path"
+  else
+    sed "${sed_args[@]}" "$template_path"
+  fi
 }
 
 build_deb() {

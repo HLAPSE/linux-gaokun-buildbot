@@ -6,7 +6,7 @@ on:
       kernel_tag:
         description: Linux kernel tag
         required: true
-        default: "v7.2-rc2"
+        default: "v7.2.5"
       build_el2:
         description: Build extra -gaokun3-el2 kernel packages
         required: true
@@ -53,21 +53,33 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v6
 
-      - name: Checkout Linux source
-        uses: actions/checkout@v6
-        with:
-          repository: torvalds/linux
-          ref: ${{ env.KERNEL_TAG }}
-          fetch-depth: 1
-          path: build-packages/mainline-linux
-
       - name: Install host dependencies
         run: |
           set -euxo pipefail
           sudo apt-get update
           sudo apt-get install -y \
             git make gcc bc bison flex cpio rsync kmod \
-            libssl-dev libelf-dev dwarves ccache dpkg-dev
+            libssl-dev libelf-dev dwarves ccache dpkg-dev aria2 xz-utils
+
+      - name: Download Linux source tarball
+        run: |
+          set -euxo pipefail
+          kern_ver="${KERNEL_TAG#v}"
+          mkdir -p build-packages/mainline-linux
+          aria2c -x 4 -s 4 -d build-packages -o linux.tar.xz \
+            "https://cdn.kernel.org/pub/linux/kernel/v${kern_ver%%.*}.x/linux-${kern_ver}.tar.xz" || \
+          aria2c -x 4 -s 4 -d build-packages -o linux.tar.xz \
+            "https://mirrors.edge.kernel.org/pub/linux/kernel/v${kern_ver%%.*}.x/linux-${kern_ver}.tar.xz"
+          tar -xJf build-packages/linux.tar.xz -C build-packages/mainline-linux --strip-components=1
+          cd build-packages/mainline-linux
+          git init -q
+          # 一次性仓库：禁用 gc。gc --auto 检测到大量松散对象后会在后台 repack/prune，
+          # 与后续脚本对源码树的快照拷贝竞态（对象被中途删除导致 ENOENT）
+          git config gc.auto 0
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add .
+          git -c commit.gpgsign=false commit -q -m "Linux ${KERNEL_TAG} baseline"
 
       - name: Resolve package release tag
         id: release_meta
@@ -88,7 +100,7 @@ jobs:
         uses: actions/cache@v5
         with:
           path: ~/.ccache
-          key: gaokun3-packages-deb-ccache-${{ env.KERNEL_TAG }}-${{ env.BUILD_EL2 }}-${{ hashFiles('patches/*.patch', 'patches/el2/*.patch', 'defconfig/**', 'dts/**', 'drivers/**', 'packaging/**', 'firmware/**', 'scripts/ci/*.sh', '.github/workflows/gaokun3-package-debs.yml') }}
+          key: gaokun3-packages-deb-ccache-${{ env.KERNEL_TAG }}-${{ env.BUILD_EL2 }}-${{ hashFiles('patches/**/*.patch', 'defconfig/**', 'dts/**', 'drivers/**', 'packaging/**', 'firmware/**', 'scripts/ci/*.sh', '.github/workflows/gaokun3-package-debs.yml') }}
           restore-keys: |
             gaokun3-packages-deb-ccache-${{ env.KERNEL_TAG }}-
             gaokun3-packages-deb-ccache-
@@ -105,25 +117,61 @@ jobs:
           chmod +x scripts/ci/70_build_package_debs.sh
           scripts/ci/70_build_package_debs.sh
 
+      # 上传/发布阶段只读 ARTIFACT_DIR；内核树、构建输出与打包 staging 在此已无用。
+      # 构建累计占用 15G+，ARM runner 磁盘紧张，不清理会导致后续步骤创建临时目录失败（ENOSPC）
+      - name: Free disk space before uploads
+        run: |
+          set -euxo pipefail
+          sudo rm -rf \
+            "$KERN_SRC" "$KERN_SRC_BASE" "$KERN_OUT" "$KERN_OUT_EL2" \
+            "$WORKDIR/debbuild" "$WORKDIR/package-buildroots" \
+            "$WORKDIR/linux.tar.xz"
+          df -h /
+
       - name: Upload build artifacts (workflow)
         uses: actions/upload-artifact@v6
         with:
           name: gaokun3-package-debs
+          compression-level: 0 # DEB 内部已是 xz/zstd 压缩数据，跳过 zip 二次压缩省临时盘与时间
           path: |
             ${{ env.ARTIFACT_DIR }}/*.deb
             ${{ env.ARTIFACT_DIR }}/package-manifest.json
             ${{ env.ARTIFACT_DIR }}/package-release-body.md
 
       - name: Publish package release
-        uses: softprops/action-gh-release@v2.6.1
-        with:
-          tag_name: ${{ steps.release_meta.outputs.package_release_tag }}
-          name: gaokun3 package DEBs - ${{ env.KERNEL_TAG }}${{ env.BUILD_EL2 == 'true' && ' + EL2' || '' }}
-          body_path: ${{ env.ARTIFACT_DIR }}/package-release-body.md
-          prerelease: false
-          make_latest: false
-          append_body: false
-          overwrite_files: true
-          files: |
-            ${{ env.ARTIFACT_DIR }}/*.deb
-            ${{ env.ARTIFACT_DIR }}/package-manifest.json
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euxo pipefail
+          release_name="gaokun3 package DEBs - ${KERNEL_TAG}"
+          if [[ "${BUILD_EL2}" == "true" ]]; then
+            release_name="${release_name} + EL2"
+          fi
+          # 先创建不带资产的 release，绕开新建 release 期间发并发上传导致的 "Error saving asset"
+          gh release create "$PACKAGE_RELEASE_TAG" \
+            --repo "${GITHUB_REPOSITORY}" \
+            --target "${GITHUB_SHA}" \
+            --title "$release_name" \
+            --notes-file "${ARTIFACT_DIR}/package-release-body.md" \
+            --latest=false
+          # release 已建好，此处并发上传各资产。
+          # 单文件限时 30 分钟防挂死；上传端点偶发 HTTP 500，--clobber 幂等，失败自动重试 3 次
+          pids=()
+          for f in "${ARTIFACT_DIR}"/*.deb "${ARTIFACT_DIR}/package-manifest.json"; do
+            (
+              for attempt in 1 2 3; do
+                if timeout 1800 gh release upload "$PACKAGE_RELEASE_TAG" "$f" \
+                  --repo "${GITHUB_REPOSITORY}" \
+                  --clobber; then
+                  exit 0
+                fi
+                echo "upload of $(basename "$f") failed on attempt $attempt/3" >&2
+                sleep $((attempt * 15))
+              done
+              exit 1
+            ) &
+            pids+=($!)
+          done
+          rc=0
+          for p in "${pids[@]}"; do wait "$p" || rc=1; done
+          [[ $rc -eq 0 ]] || { echo "some release assets failed to upload" >&2; exit 1; }

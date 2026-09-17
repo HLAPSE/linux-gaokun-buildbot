@@ -4,25 +4,25 @@ on:
   workflow_dispatch:
     inputs:
       fedora_release:
-        description: Fedora release version
+        description: Fedora release version (e.g. 44, 43)
         required: true
         default: "44"
       kernel_tag:
         description: Linux kernel tag
         required: true
-        default: "v7.2-rc2"
+        default: "v7.2.5"
       desktop_environment:
-        description: Desktop environment package group (single package or group)
+        description: Desktop environment group (e.g. @gnome-desktop @workstation-product)
         required: true
         default: "@gnome-desktop @workstation-product"
       excluded_packages:
-        description: Packages to exclude from rootfs install (comma-separated)
+        description: Packages to exclude from installation (comma-separated)
         required: true
-        default: "gnome-boxes,gnome-connections,snapshot,gnome-weather,gnome-contacts,gnome-maps,simple-scan,gnome-clocks,gnome-calculator,gnome-calendar,amd-gpu-firmware,intel-gpu-firmware,linux-firmware,nvidia-gpu-firmware,toolbox,unoconv,mediawriter"
+        default: "open-vm-tools,spice-vdagent, hyperv*"
       extra_packages:
         description: Extra packages to install (space-separated)
         required: true
-        default: "fcitx5-chinese-addons gnome-tweaks gnome-extensions-app telnet mpv v4l-utils vim nano ripgrep git htop fastfetch screen firefox"
+        default: "google-noto-sans-cjk-tc-fonts google-noto-sans-cjk-sc-fonts google-noto-sans-cjk-jp-fonts google-noto-sans-cjk-kr-fonts google-noto-serif-cjk-fonts ibus-libpinyin nano mpv ripgrep git htop curl wget NetworkManager-wifi cloud-utils-growroot microcode-fedora ipw2100-firmware* ipw2200-firmware* fedora-release-ostree"
       build_el2:
         description: Build and include optional -gaokun3-el2 kernel and EL2 EFI payloads
         required: true
@@ -58,8 +58,9 @@ jobs:
       EXCLUDED_PACKAGES: ${{ github.event.inputs.excluded_packages }}
       EXTRA_PACKAGES: ${{ github.event.inputs.extra_packages }}
       BUILD_EL2: ${{ github.event.inputs.build_el2 }}
-      IMAGE_SIZE: 12G
+      IMAGE_SIZE: 12G # 兜底值；实际由 "Compute image size" 步骤按 rootfs 用量动态覆盖
       IMAGE_CHUNK_SIZE: 1900M
+      ZSTD_LEVEL: 15 # -19 极慢；-15 压缩率基本持平，速度快约一倍
       GAOKUN_DIR: ${{ github.workspace }}
       WORKDIR: ${{ github.workspace }}/build-fedora
       ROOTFS_DIR: ${{ github.workspace }}/build-fedora/rootfs
@@ -76,152 +77,130 @@ jobs:
           set -euxo pipefail
           sudo apt-get update
           sudo apt-get install -y \
-            rsync kmod curl jq \
-            parted dosfstools e2fsprogs btrfs-progs zstd xz-utils python3
+            docker.io parted dosfstools e2fsprogs \
+            rsync kmod curl jq zstd xz-utils python3
 
-      - name: Prepare build workspace
-        run: |
-          set -euxo pipefail
-          mkdir -p "$WORKDIR" "$ROOTFS_DIR" "$ARTIFACT_DIR"
-
-      - name: Resolve package release tag
+      # 解析包发布 tag（未随本次运行重建时）并下载 manifest + RPM
+      - name: Fetch gaokun package RPMs
         env:
           GITHUB_TOKEN: ${{ github.token }}
         run: |
           set -euxo pipefail
+          mkdir -p "$WORKDIR" "$ROOTFS_DIR" "$ARTIFACT_DIR" "$PACKAGE_RPMS_DIR"
 
-          if [[ "${{ github.event.inputs.rebuild_package_rpms }}" == "true" ]]; then
-            package_release_tag="${{ needs.build-package-rpms.outputs.package_release_tag }}"
-          else
-            safe_kernel_tag="${KERNEL_TAG//\//-}"
-            safe_kernel_tag="${safe_kernel_tag//[^A-Za-z0-9._-]/-}"
-            profile="std"
-            if [[ "$BUILD_EL2" == "true" ]]; then
-              profile="std-el2"
-            fi
-            prefix="gaokun3-rpms-${safe_kernel_tag}-${profile}-"
-
-            releases_json="$WORKDIR/releases.json"
+          # GitHub API 认证 GET
+          api() {
             curl -fsSL \
               -H "Authorization: Bearer ${GITHUB_TOKEN}" \
               -H "Accept: application/vnd.github+json" \
-              "https://api.github.com/repos/${GITHUB_REPOSITORY}/releases?per_page=100" \
-              -o "$releases_json"
+              "$@"
+          }
 
-            package_release_tag="$(jq -r --arg prefix "$prefix" '.[] | select(.tag_name | startswith($prefix)) | .tag_name' "$releases_json" | head -n 1)"
-            if [[ -z "$package_release_tag" ]]; then
+          # 按附件名从 release JSON 解析下载地址并下载，缺失即失败
+          download_asset() {
+            local name="$1"
+            local out="$2"
+            local url
+            url="$(jq -r --arg name "$name" '.assets[] | select(.name == $name) | .url' "$release_json")"
+            if [[ -z "$url" || "$url" == "null" ]]; then
+              echo "missing asset ${name} in release ${PACKAGE_RELEASE_TAG}" >&2
+              exit 1
+            fi
+            curl -fsSL \
+              -H "Authorization: Bearer ${GITHUB_TOKEN}" \
+              -H "Accept: application/octet-stream" \
+              "$url" -o "$out"
+          }
+
+          if [[ "${{ github.event.inputs.rebuild_package_rpms }}" != "true" ]]; then
+            # 未重建：按 kernel tag + profile 前缀取最近一次包发布
+            safe_kernel_tag="${KERNEL_TAG//\//-}"
+            safe_kernel_tag="${safe_kernel_tag//[^A-Za-z0-9._-]/-}"
+            profile="std"
+            [[ "$BUILD_EL2" == "true" ]] && profile="std-el2"
+            prefix="gaokun3-rpms-${safe_kernel_tag}-${profile}-"
+
+            releases_json="$WORKDIR/releases.json"
+            api "https://api.github.com/repos/${GITHUB_REPOSITORY}/releases?per_page=100" -o "$releases_json"
+
+            PACKAGE_RELEASE_TAG="$(jq -r --arg prefix "$prefix" '.[] | select(.tag_name | startswith($prefix)) | .tag_name' "$releases_json" | head -n 1)"
+            if [[ -z "$PACKAGE_RELEASE_TAG" ]]; then
               echo "no package release found for prefix ${prefix}" >&2
               exit 1
             fi
+          else
+            # 本次已重建：直接用上游 job 产出的 tag
+            PACKAGE_RELEASE_TAG="${{ needs.build-package-rpms.outputs.package_release_tag }}"
           fi
 
-          echo "PACKAGE_RELEASE_TAG=$package_release_tag" >> "$GITHUB_ENV"
-
-      - name: Download gaokun package RPMs
-        env:
-          GITHUB_TOKEN: ${{ github.token }}
-        run: |
-          set -euxo pipefail
-          mkdir -p "$PACKAGE_RPMS_DIR"
-
-          api_url="https://api.github.com/repos/${GITHUB_REPOSITORY}/releases/tags/${PACKAGE_RELEASE_TAG}"
           release_json="$WORKDIR/package-release.json"
-
-          curl -fsSL \
-            -H "Authorization: Bearer ${GITHUB_TOKEN}" \
-            -H "Accept: application/vnd.github+json" \
-            "$api_url" \
-            -o "$release_json"
-
-          asset_name="package-manifest.json"
-          asset_url="$(jq -r --arg name "$asset_name" '.assets[] | select(.name == $name) | .url' "$release_json")"
-
-          if [[ -z "$asset_url" || "$asset_url" == "null" ]]; then
-            echo "missing asset ${asset_name} in release ${PACKAGE_RELEASE_TAG}" >&2
-            exit 1
-          fi
-
-          curl -fsSL \
-            -H "Authorization: Bearer ${GITHUB_TOKEN}" \
-            -H "Accept: application/octet-stream" \
-            "$asset_url" \
-            -o "$PACKAGE_RPMS_DIR/$asset_name"
+          api "https://api.github.com/repos/${GITHUB_REPOSITORY}/releases/tags/${PACKAGE_RELEASE_TAG}" -o "$release_json"
 
           manifest_path="$PACKAGE_RPMS_DIR/package-manifest.json"
-          manifest_kernel_tag="$(jq -r '.kernel_tag' "$manifest_path")"
-          manifest_build_el2="$(jq -r '.build_el2' "$manifest_path")"
+          download_asset package-manifest.json "$manifest_path"
 
+          manifest_kernel_tag="$(jq -r '.kernel_tag' "$manifest_path")"
           if [[ "$manifest_kernel_tag" != "$KERNEL_TAG" ]]; then
             echo "package release kernel tag mismatch: expected ${KERNEL_TAG}, got ${manifest_kernel_tag}" >&2
             exit 1
           fi
-
-          if [[ "$BUILD_EL2" == "true" && "$manifest_build_el2" != "true" ]]; then
+          if [[ "$BUILD_EL2" == "true" && "$(jq -r '.build_el2' "$manifest_path")" != "true" ]]; then
             echo "package release ${PACKAGE_RELEASE_TAG} does not contain EL2 packages" >&2
             exit 1
           fi
 
-          asset_names=(
-            "$(jq -r '.kernels.standard.packages.kernel' "$manifest_path")"
-            "$(jq -r '.kernels.standard.packages.kernel_modules' "$manifest_path")"
-            "$(jq -r '.packages.firmware' "$manifest_path")"
+          rpm_jq_paths=(
+            '.kernels.standard.packages.kernel'
+            '.kernels.standard.packages.kernel_modules'
+            '.packages.firmware'
           )
+          [[ "$BUILD_EL2" == "true" ]] && rpm_jq_paths+=('.kernels.el2.packages.kernel' '.kernels.el2.packages.kernel_modules')
 
-          if [[ "$BUILD_EL2" == "true" ]]; then
-            asset_names+=(
-              "$(jq -r '.kernels.el2.packages.kernel' "$manifest_path")"
-              "$(jq -r '.kernels.el2.packages.kernel_modules' "$manifest_path")"
-            )
-          fi
-
-          for asset_name in "${asset_names[@]}"; do
-            asset_url="$(jq -r --arg name "$asset_name" '.assets[] | select(.name == $name) | .url' "$release_json")"
-
-            if [[ -z "$asset_url" || "$asset_url" == "null" ]]; then
-              echo "missing asset ${asset_name} in release ${PACKAGE_RELEASE_TAG}" >&2
-              exit 1
-            fi
-
-            curl -fsSL \
-              -H "Authorization: Bearer ${GITHUB_TOKEN}" \
-              -H "Accept: application/octet-stream" \
-              "$asset_url" \
-              -o "$PACKAGE_RPMS_DIR/$asset_name"
+          for jq_path in "${rpm_jq_paths[@]}"; do
+            rpm_name="$(jq -r "$jq_path" "$manifest_path")"
+            download_asset "$rpm_name" "$PACKAGE_RPMS_DIR/$rpm_name"
           done
 
       - name: Bootstrap Fedora rootfs
         run: |
           set -euxo pipefail
+          # 交互变量通过 --env 传入容器（VAR=value 形式不受 sudo 重置环境影响），
+          # 避免在单引号脚本里做引号拼接
           sudo docker run --rm \
-            -v "$GITHUB_WORKSPACE":"$GITHUB_WORKSPACE" \
-            -w "$GITHUB_WORKSPACE" \
+            --env ROOTFS_DIR="$ROOTFS_DIR" \
+            --env FEDORA_RELEASE="$FEDORA_RELEASE" \
+            --env DESKTOP_ENVIRONMENT="$DESKTOP_ENVIRONMENT" \
+            --env EXCLUDED_PACKAGES="$EXCLUDED_PACKAGES" \
+            --env EXTRA_PACKAGES="$EXTRA_PACKAGES" \
+            -v "$(dirname "$ROOTFS_DIR")":"$(dirname "$ROOTFS_DIR")" \
             --user root \
             "fedora:${FEDORA_RELEASE}" \
             bash -euxo pipefail -c '
               echo "%_install_langs all" > /etc/rpm/macros.image-language-conf
               sed -i "/tsflags=nodocs/d" /etc/dnf/dnf.conf
 
-              mkdir -p "'"$ROOTFS_DIR"'/etc"
+              mkdir -p "$ROOTFS_DIR/etc"
 
-              dnf -y --installroot="'"$ROOTFS_DIR"'" --releasever="'"$FEDORA_RELEASE"'" --forcearch=aarch64 --use-host-config \
-                --exclude="'"$EXCLUDED_PACKAGES"'" \
+              # dconf 供后续镜像配置步骤使用（dconf update 把屏幕键盘等默认值写入数据库）
+              dnf -y --installroot="$ROOTFS_DIR" --releasever="$FEDORA_RELEASE" --forcearch=aarch64 --use-host-config \
+                --exclude="$EXCLUDED_PACKAGES" \
                 install \
-                @core @standard "'"$DESKTOP_ENVIRONMENT"'" \
+                @core @standard "$DESKTOP_ENVIRONMENT" \
                 systemd-boot-unsigned alsa-ucm \
                 langpacks-en langpacks-zh_CN \
                 google-noto-color-emoji-fonts google-noto-emoji-fonts \
-                alsa-utils pipewire-utils \
-                '"$EXTRA_PACKAGES"'
+                alsa-utils pipewire-utils dconf \
+                $EXTRA_PACKAGES
 
-              dnf -y --installroot="'"$ROOTFS_DIR"'" --releasever="'"$FEDORA_RELEASE"'" --forcearch=aarch64 --use-host-config \
+              dnf -y --installroot="$ROOTFS_DIR" --releasever="$FEDORA_RELEASE" --forcearch=aarch64 --use-host-config \
                 install \
-                https://download1.rpmfusion.org/free/fedora/rpmfusion-free-release-'"$FEDORA_RELEASE"'.noarch.rpm
+                "https://download1.rpmfusion.org/free/fedora/rpmfusion-free-release-${FEDORA_RELEASE}.noarch.rpm"
 
               mkdir -p /etc/pki/rpm-gpg
-              cp -a "'"$ROOTFS_DIR"'/etc/pki/rpm-gpg/." /etc/pki/rpm-gpg/
+              cp -a "$ROOTFS_DIR/etc/pki/rpm-gpg/." /etc/pki/rpm-gpg/
 
-              dnf -y --installroot="'"$ROOTFS_DIR"'" --releasever="'"$FEDORA_RELEASE"'" --forcearch=aarch64 --use-host-config \
-                --setopt=reposdir="'"$ROOTFS_DIR"'/etc/yum.repos.d,/etc/yum.repos.d" \
+              dnf -y --installroot="$ROOTFS_DIR" --releasever="$FEDORA_RELEASE" --forcearch=aarch64 --use-host-config \
+                --setopt=reposdir="$ROOTFS_DIR/etc/yum.repos.d,/etc/yum.repos.d" \
                 install \
                 libavcodec-freeworld
             '
@@ -230,93 +209,125 @@ jobs:
         run: |
           set -euxo pipefail
           manifest_path="$PACKAGE_RPMS_DIR/package-manifest.json"
-          manifest_kernel_release="$(jq -r '.kernels.standard.release' "$manifest_path")"
-          kernel_rpm_name="$(jq -r '.kernels.standard.packages.kernel' "$manifest_path")"
-          kernel_modules_rpm_name="$(jq -r '.kernels.standard.packages.kernel_modules' "$manifest_path")"
-          firmware_rpm_name="$(jq -r '.packages.firmware' "$manifest_path")"
-          echo "$manifest_kernel_release" > "$WORKDIR/kernel-release.txt"
+
+          kernel_release="$(jq -r '.kernels.standard.release' "$manifest_path")"
+          echo "$kernel_release" > "$WORKDIR/kernel-release.txt"
 
           el2_kernel_release=""
-          el2_kernel_rpm_name=""
-          el2_kernel_modules_rpm_name=""
           if [[ "$BUILD_EL2" == "true" ]]; then
             el2_kernel_release="$(jq -r '.kernels.el2.release' "$manifest_path")"
-            el2_kernel_rpm_name="$(jq -r '.kernels.el2.packages.kernel' "$manifest_path")"
-            el2_kernel_modules_rpm_name="$(jq -r '.kernels.el2.packages.kernel_modules' "$manifest_path")"
             echo "$el2_kernel_release" > "$WORKDIR/kernel-release-el2.txt"
           else
             rm -f "$WORKDIR/kernel-release-el2.txt"
           fi
 
-          rpm_install_args=(
-            "\"$PACKAGE_RPMS_DIR/$kernel_rpm_name\""
-            "\"$PACKAGE_RPMS_DIR/$kernel_modules_rpm_name\""
-            "\"$PACKAGE_RPMS_DIR/$firmware_rpm_name\""
+          rpm_files=(
+            "$PACKAGE_RPMS_DIR/$(jq -r '.kernels.standard.packages.kernel' "$manifest_path")"
+            "$PACKAGE_RPMS_DIR/$(jq -r '.kernels.standard.packages.kernel_modules' "$manifest_path")"
+            "$PACKAGE_RPMS_DIR/$(jq -r '.packages.firmware' "$manifest_path")"
           )
           if [[ "$BUILD_EL2" == "true" ]]; then
-            rpm_install_args+=(
-              "\"$PACKAGE_RPMS_DIR/$el2_kernel_rpm_name\""
-              "\"$PACKAGE_RPMS_DIR/$el2_kernel_modules_rpm_name\""
+            rpm_files+=(
+              "$PACKAGE_RPMS_DIR/$(jq -r '.kernels.el2.packages.kernel' "$manifest_path")"
+              "$PACKAGE_RPMS_DIR/$(jq -r '.kernels.el2.packages.kernel_modules' "$manifest_path")"
             )
           fi
-          rpm_install_args_string="$(printf '%s ' "${rpm_install_args[@]}")"
 
+          # RPM 路径不含空白，容器内靠分词展开
           sudo docker run --rm \
+            --env ROOTFS_DIR="$ROOTFS_DIR" \
+            --env FEDORA_RELEASE="$FEDORA_RELEASE" \
+            --env RPM_FILES="${rpm_files[*]}" \
             -v "$(dirname "$ROOTFS_DIR")":"$(dirname "$ROOTFS_DIR")" \
             -v "$PACKAGE_RPMS_DIR":"$PACKAGE_RPMS_DIR" \
-            -w / \
             --user root \
             "fedora:${FEDORA_RELEASE}" \
             bash -euxo pipefail -c '
+              # 腾出 gaokun 固件包的位置：先卸载发行版自带的 atheros/qcom 固件
               stock_firmware_packages=()
-              rpm --root="'"$ROOTFS_DIR"'" -q atheros-firmware >/dev/null 2>&1 && stock_firmware_packages+=(atheros-firmware)
-              rpm --root="'"$ROOTFS_DIR"'" -q qcom-firmware >/dev/null 2>&1 && stock_firmware_packages+=(qcom-firmware)
+              rpm --root="$ROOTFS_DIR" -q atheros-firmware >/dev/null 2>&1 && stock_firmware_packages+=(atheros-firmware)
+              rpm --root="$ROOTFS_DIR" -q qcom-firmware >/dev/null 2>&1 && stock_firmware_packages+=(qcom-firmware)
               if (( ${#stock_firmware_packages[@]} )); then
-                rpm --root="'"$ROOTFS_DIR"'" -e --nodeps "${stock_firmware_packages[@]}"
+                rpm --root="$ROOTFS_DIR" -e --nodeps "${stock_firmware_packages[@]}"
               fi
 
-              dnf -y --installroot="'"$ROOTFS_DIR"'" --releasever="'"$FEDORA_RELEASE"'" --use-host-config --nogpgcheck \
+              dnf -y --installroot="$ROOTFS_DIR" --releasever="$FEDORA_RELEASE" --use-host-config --nogpgcheck \
                 install --allowerasing \
-                '"$rpm_install_args_string"'
+                $RPM_FILES
             '
 
-          sudo depmod -b "$ROOTFS_DIR" -a "$manifest_kernel_release"
+          sudo depmod -b "$ROOTFS_DIR" -a "$kernel_release"
           if [[ "$BUILD_EL2" == "true" ]]; then
             sudo depmod -b "$ROOTFS_DIR" -a "$el2_kernel_release"
           fi
 
-      - name: Create disk image and configure boot
+      - name: Slim rootfs (remove caches, logs, docs before imaging)
         run: |
-          chmod +x scripts/ci/50_make_image_fedora.sh
-          scripts/ci/50_make_image_fedora.sh
+          set -euxo pipefail
+          sudo find "$ROOTFS_DIR/usr/share/doc" -type f \( -name '*.gz' -o -name 'changelog*' -o -name 'README*' -o -name 'LICENSE*' \) -delete 2>/dev/null || true
+          sudo find "$ROOTFS_DIR/usr/share/man" -type f \( -name '*.gz' -o -name '*.bz2' -o -name '*.zst' \) -delete 2>/dev/null || true
+          sudo rm -rf "$ROOTFS_DIR/var/log/journal"
+          # 只清空内容、保留目录本身与权限位：后续 chroot 步骤、镜像内运行时都依赖 /tmp、/var/tmp、/var/cache
+          sudo find "$ROOTFS_DIR/tmp" "$ROOTFS_DIR/var/tmp" "$ROOTFS_DIR/var/cache" -mindepth 1 -delete 2>/dev/null || true
+          sudo du -sh "$ROOTFS_DIR"
 
+      - name: Compute image size from rootfs usage
+        run: |
+          set -euxo pipefail
+          used_kib="$(sudo du -sk "$ROOTFS_DIR" | cut -f1)"
+          # rootfs 用量 + btrfs 元数据余量 15% + 2GiB 冗余 + 1GiB ESP，向上取整到 GiB，下限 8G
+          want_gib=$(( (used_kib / 10 * 3 / 2 + used_kib) * 1024 + 3 * 1024 * 1024 * 1024 ) / (1024 * 1024 * 1024) )
+          if (( want_gib < 8 )); then
+            want_gib=8
+          fi
+          echo "IMAGE_SIZE=${want_gib}G" >> "$GITHUB_ENV"
+          echo "image size: ${want_gib}G (rootfs usage: $(( used_kib / 1024 ))MiB)"
+
+      - name: Create disk image and configure boot
+        run: scripts/ci/50_make_image_fedora.sh
+
+      # 输出 tag_name / kernel_release / package_glob 到 GITHUB_OUTPUT
       - name: Package image and generate release info
         id: package
-        run: |
-          chmod +x scripts/ci/60_package_release_fedora.sh
-          scripts/ci/60_package_release_fedora.sh
-          TAG_NAME="$(cat "$WORKDIR/tag-name.txt")"
-          KREL="$(cat "$WORKDIR/kernel-release-export.txt")"
-          PACKAGE_GLOB="$(cat "$WORKDIR/package-glob.txt")"
-          RELEASE_BODY_FILE="$(cat "$WORKDIR/release-body-file.txt")"
-          echo "tag_name=$TAG_NAME" >> "$GITHUB_OUTPUT"
-          echo "artifact_dir=$ARTIFACT_DIR" >> "$GITHUB_OUTPUT"
-          echo "kernel_release=$KREL" >> "$GITHUB_OUTPUT"
-          echo "package_glob=$PACKAGE_GLOB" >> "$GITHUB_OUTPUT"
-          echo "release_body_file=$RELEASE_BODY_FILE" >> "$GITHUB_OUTPUT"
+        run: scripts/ci/60_package_release_fedora.sh
 
       - name: Upload build artifacts (workflow)
         uses: actions/upload-artifact@v6
         with:
           name: fedora-gaokun3-build
-          path: |
-            ${{ steps.package.outputs.artifact_dir }}/${{ steps.package.outputs.package_glob }}
+          compression-level: 0 # .zst 已是压缩数据，跳过 zip 打包的重复压缩
+          path: ${{ env.ARTIFACT_DIR }}/${{ steps.package.outputs.package_glob }}
 
       - name: Create GitHub Release
-        uses: softprops/action-gh-release@v2.6.1
-        with:
-          tag_name: ${{ steps.package.outputs.tag_name }}
-          name: Fedora Linux ${{ env.FEDORA_RELEASE }} - gaokun3 - ${{ steps.package.outputs.kernel_release }}
-          body_path: ${{ steps.package.outputs.artifact_dir }}/${{ steps.package.outputs.release_body_file }}
-          files: |
-            ${{ steps.package.outputs.artifact_dir }}/${{ steps.package.outputs.package_glob }}
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euxo pipefail
+          # 先建空 release，再并发上传分卷（"Error saving asset" 竞态只出现在新建 release 期间）
+          gh release create "${{ steps.package.outputs.tag_name }}" \
+            --repo "${GITHUB_REPOSITORY}" \
+            --target "${GITHUB_SHA}" \
+            --title "Fedora ${{ env.FEDORA_RELEASE }} - gaokun3 - ${{ steps.package.outputs.kernel_release }}" \
+            --notes-file "${ARTIFACT_DIR}/release-body.md" \
+            --latest=false
+          # 镜像分卷单卷可达 1.9G：单文件限时 60 分钟防挂死；上传端点偶发 HTTP 500，
+          # --clobber 幂等，失败自动重试 3 次
+          pids=()
+          for f in "${ARTIFACT_DIR}"/${{ steps.package.outputs.package_glob }}; do
+            (
+              for attempt in 1 2 3; do
+                if timeout 3600 gh release upload "${{ steps.package.outputs.tag_name }}" "$f" \
+                  --repo "${GITHUB_REPOSITORY}" \
+                  --clobber; then
+                  exit 0
+                fi
+                echo "upload of $(basename "$f") failed on attempt $attempt/3" >&2
+                sleep $((attempt * 15))
+              done
+              exit 1
+            ) &
+            pids+=($!)
+          done
+          rc=0
+          for p in "${pids[@]}"; do wait "$p" || rc=1; done
+          [[ $rc -eq 0 ]] || { echo "some release assets failed to upload" >&2; exit 1; }
