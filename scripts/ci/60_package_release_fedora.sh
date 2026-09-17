@@ -36,8 +36,10 @@ EOF
 "
 fi
 
-cp "$IMAGE_FILE" "$ARTIFACT_DIR/"
-zstd -T0 -19 "$ARTIFACT_DIR/$IMAGE_BASENAME" -o "$ZST_FILE"
+# 压缩级别可调：-19 极慢，-15 压缩率基本持平、速度快约一倍
+# 原始 img 不随发布上传（只上传 .zst / 分卷），直接从 IMAGE_FILE 压缩，省一次整盘拷贝
+ZSTD_LEVEL="${ZSTD_LEVEL:-19}"
+zstd -T0 "-${ZSTD_LEVEL}" "$IMAGE_FILE" -o "$ZST_FILE"
 
 # 公共发布说明先写一份，超过 2GB 再追加分卷重组说明
 cat > "$RELEASE_BODY_FILE" <<EOF
@@ -87,9 +89,15 @@ fi
 
 sudo chown "$(id -u):$(id -g)" "$RELEASE_BODY_FILE"
 
-TAG_NAME="fedora${FEDORA_RELEASE}-${KREL}$(if [[ "$BUILD_EL2" == "true" ]]; then printf -- '-el2'; fi)-$(date -u +%Y%m%d%H%M%S)"
+el2_suffix=""
+[[ "$BUILD_EL2" == "true" ]] && el2_suffix="-el2"
+TAG_NAME="fedora${FEDORA_RELEASE}-${KREL}${el2_suffix}-$(date -u +%Y%m%d%H%M%S)"
 
-echo "$TAG_NAME" > "$WORKDIR/tag-name.txt"
-echo "$KREL" > "$WORKDIR/kernel-release-export.txt"
-echo "$PACKAGE_GLOB" > "$WORKDIR/package-glob.txt"
-echo "$(basename "$RELEASE_BODY_FILE")" > "$WORKDIR/release-body-file.txt"
+# workflow 从 GITHUB_OUTPUT 读取发布信息；本地构建没有该变量时跳过
+if [[ -n "${GITHUB_OUTPUT:-}" ]]; then
+  {
+    echo "tag_name=$TAG_NAME"
+    echo "kernel_release=$KREL"
+    echo "package_glob=$PACKAGE_GLOB"
+  } >> "$GITHUB_OUTPUT"
+fi
