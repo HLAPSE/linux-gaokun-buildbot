@@ -1,0 +1,39 @@
+#!/usr/bin/env bash
+# 将根分区/根文件系统扩容到可用空间
+# 场景: DG 还原 rootfs 到内置 SSD 后，分区或文件系统仍是镜像的 12G 尺寸
+# 两种情况都覆盖:
+#   1. 目标分区建得更大 -> 只需扩展文件系统 (resize2fs / btrfs resize)
+#   2. 分区后面还有空隙 -> growpart 先扩分区再扩文件系统
+# U 盘 Live 测试场景(可移动介质)直接跳过，保持测试介质原样
+set -uo pipefail
+
+root_dev="$(findmnt -n -o SOURCE /)"
+# btrfs 子卷根（如 Fedora 的 subvol=@）会返回 /dev/xxx[/@]，剥离子卷后缀才能解析磁盘
+root_dev="${root_dev%%\[*\]}"
+disk="/dev/$(lsblk -dn -o PKNAME "$root_dev" 2>/dev/null)"
+partno="$(lsblk -dn -o PARTN "$root_dev" 2>/dev/null)"
+
+# 无法定位所属磁盘(如 overlayfs 容器)则退出
+[[ -b "$disk" && "$partno" =~ ^[0-9]+$ ]] || exit 0
+
+# 可移动介质(U 盘 Live)不扩容
+removable="/sys/class/block/$(basename "$disk")/removable"
+if [[ -f "$removable" && "$(cat "$removable")" == "1" ]]; then
+    exit 0
+fi
+
+fstype="$(findmnt -n -o FSTYPE /)"
+echo "gaokun-grow-rootfs: root=$root_dev fstype=$fstype disk=$disk part=$partno"
+
+# 分区层扩容(分区后部无空隙时 growpart 返回非 0，属正常)
+if command -v growpart >/dev/null 2>&1; then
+    growpart "$disk" "$partno" || true
+    partx -u "$disk" 2>/dev/null || true
+fi
+
+# 文件系统层扩容(已到最大尺寸时为幂等 no-op)
+case "$fstype" in
+    ext4)  resize2fs "$root_dev" || true ;;
+    btrfs) btrfs filesystem resize max / || true ;;
+    *) echo "gaokun-grow-rootfs: 不支持的文件系统 $fstype，跳过" ;;
+esac

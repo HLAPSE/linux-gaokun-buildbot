@@ -4,37 +4,29 @@ set -euo pipefail
 SRC_MONITORS="/home/user/.config/monitors.xml"
 SENTINEL="/var/lib/.gaokun-monitors-synced"
 
-pick_gdm_dir() {
-  local candidate
-
-  for candidate in \
-    /var/lib/gdm3/.config \
-    /var/lib/gdm3/seat0/config \
-    /var/lib/gdm/.config \
-    /var/lib/gdm/seat0/config; do
-    if [[ -d "$candidate" ]]; then
-      printf '%s\n' "$candidate"
-      return 0
-    fi
-  done
-
-  return 1
-}
-
 [[ -f "$SRC_MONITORS" ]] || exit 0
 [[ ! -e "$SENTINEL" ]] || exit 0
 
-for _ in $(seq 1 30); do
-  if GDM_DIR="$(pick_gdm_dir)"; then
-    DST_MONITORS="$GDM_DIR/monitors.xml"
-    cp "$SRC_MONITORS" "$DST_MONITORS"
-    chown --reference="$GDM_DIR" "$DST_MONITORS"
-    touch "$SENTINEL"
-    systemctl disable gdm-monitor-sync.service || true
-    systemctl try-restart gdm.service || true
-    exit 0
-  fi
-  sleep 1
+# 账户名/家目录随发行版不同：新版 Ubuntu 是 gdm:/var/lib/gdm3，
+# 旧版 Debian/Ubuntu 是 Debian-gdm:/var/lib/gdm3，Fedora 是 gdm:/var/lib/gdm。
+# 以 passwd 数据库为准，不要把路径写死。
+GDM_HOME=""
+for gdm_user in gdm Debian-gdm; do
+    # 注意 pipefail：getent 查无此人返回 2，必须兜住，否则 set -e 会直接杀掉脚本
+    GDM_HOME="$(getent passwd "$gdm_user" 2>/dev/null | cut -d: -f6)" || true
+    [[ -n "$GDM_HOME" ]] && break
 done
+[[ -n "$GDM_HOME" ]] || exit 0
+gdm_group="$(id -gn "$gdm_user")"
 
+# GDM 的配置目录在首次启动时并不存在，这里直接按 gdm 账户家目录创建，
+# 避免旧逻辑里空等 30 次、既拖慢启动又同步不成功。
+GDM_DIR="$GDM_HOME/.config"
+install -d -m 0700 -o "$gdm_user" -g "$gdm_group" "$GDM_DIR"
+
+install -o "$gdm_user" -g "$gdm_group" -m 0644 "$SRC_MONITORS" "$GDM_DIR/monitors.xml"
+touch "$SENTINEL"
+
+systemctl disable gdm-monitor-sync.service || true
+systemctl try-restart gdm.service || true
 exit 0
