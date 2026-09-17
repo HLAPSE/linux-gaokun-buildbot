@@ -95,16 +95,37 @@ EOF
 
 install -d -m 0755 /home/user/.config
 install -Dm644 /usr/local/share/gaokun/monitors.xml /home/user/.config/monitors.xml
+
+# 预置 user 级输入源（与系统级 dconf 默认完全一致）：
+# 首次登录的 gnome-initial-setup（--existing-user）键盘页会按 zh_CN locale
+# 再写一份 user 级输入源，与系统级默认叠加后出现重复的「智能拼音」；
+# 显式预置后，所有「未配置则按 locale 自动追加输入源」的逻辑都会跳过。
+_user_kf_dir=$(mktemp -d)
+cat > "$_user_kf_dir/00-input-sources" <<'INPUT_SOURCES_EOF'
+[org/gnome/desktop/input-sources]
+current=uint32 0
+sources=[('xkb', 'us'), ('ibus', 'libpinyin')]
+xkb-options=@as []
+INPUT_SOURCES_EOF
+install -d -m 0755 /home/user/.config/dconf
+dconf compile /home/user/.config/dconf/user "$_user_kf_dir"
+rm -rf "$_user_kf_dir"
+
+# 预置「已完成初始设置」标记，跳过首次登录的 gnome-initial-setup：
+# marker 路径对应 gnome-initial-setup-first-login.service 的
+# ConditionPathExists=!%E/gnome-initial-setup-done（%E 即 ~/.config）
+install -D -m 0644 /dev/null /home/user/.config/gnome-initial-setup-done
+
 chown -R user:user /home/user
 
 install -d -m 1777 -o root -g root /tmp/.X11-unix
 
-# GDM 自动登录：平板形态 + 补丁测试场景（触屏失效时无需键盘输密码）
-# 如需关闭，注释掉下面两行 AutomaticLogin 即可
+# GDM 登录默认要求密码验证（安全默认）。
+# 如需平板形态/补丁测试场景免密登录，取消注释下面两行 AutomaticLogin 即可
 cat > /etc/gdm3/custom.conf <<'EOF'
 [daemon]
-AutomaticLoginEnable=True
-AutomaticLogin=user
+#AutomaticLoginEnable=True
+#AutomaticLogin=user
 EOF
 
 cat > /etc/systemd/system/gaokun-fix-x11-unix.service <<'EOF'
@@ -133,6 +154,15 @@ systemctl disable NetworkManager-wait-online.service || true
 # 中文输入走 GNOME 原生 ibus + libpinyin（屏幕键盘依赖 Shell 的 ibus/text-input 链路，fcitx5 会使其失效）
 command -v dconf >/dev/null 2>&1 || { echo "ERROR: dconf not available in chroot (install dconf-cli)" >&2; exit 1; }
 dconf update
+
+# 构建期冒烟测试：完整走一遍「软件更新器」(update-manager) 的启动导入链
+# （gi/Handy → uaclient(ubuntu-pro-client) → UbuntuDrivers → DistUpgrade）。
+# 26.04 开发期 update-manager 与 python3-distupgrade 版本错配会导致启动即
+# ImportError（LP: #2141637）；任何依赖缺失也会点击即崩。
+# 在这里失败远好过装出一个「软件更新器点开就报错」的镜像。
+if [ -e /usr/bin/update-manager ]; then
+  python3 -c "import gi; gi.require_version('Gdk', '3.0'); gi.require_version('Gtk', '3.0'); gi.require_version('Handy', '1'); from gi.repository import Gtk, Handy; from UpdateManager.UpdateManager import UpdateManager; from UpdateManager.Core.utils import init_proxy; import UpdateManager.UpdatesAvailable"
+fi
 
 # 时区：中国区默认 Asia/Shanghai（chroot 内 timedatectl 不可用，用符号链接 + tz 文件）
 ln -sf /usr/share/zoneinfo/Asia/Shanghai /etc/localtime
@@ -185,22 +215,19 @@ cat > /etc/kernel/cmdline <<EOF
 root=UUID=$ROOT_UUID clk_ignore_unused pd_ignore_unused arm64.nopauth iommu.passthrough=0 iommu.strict=0 pcie_aspm.policy=powersupersave modprobe.blacklist=simpledrm efi=noruntime fbcon=rotate:1 usbcore.autosuspend=-1 usbhid.quirks=0x12d1:0x10b8:0x20000000 consoleblank=0 loglevel=4 psi=1
 EOF
 
-cat > /etc/kernel/devicetree <<'EOF'
-qcom/sc8280xp-huawei-gaokun3.dtb
-EOF
-
-run_update_initramfs() {
+# /etc/kernel/{install.conf,cmdline,devicetree} 就是 kernel-install 的默认配置位置：
+# 按内核变体切换 devicetree 后，update-initramfs 与 kernel-install 依次复用，
+# 无需再为每次 kernel-install 构造临时 KERNEL_INSTALL_CONF_ROOT 目录
+install_kernel_variant() {
   local krel="$1"
   local dtb="$2"
 
   printf 'qcom/%s\n' "$dtb" > /etc/kernel/devicetree
   update-initramfs -c -k "$krel"
+  kernel-install --entry-token=machine-id remove "$krel" || true
+  kernel-install --verbose --make-entry-directory=yes --entry-token=machine-id add \
+    "$krel" "/boot/vmlinuz-$krel" "/boot/initrd.img-$krel"
 }
-
-run_update_initramfs "$KREL" "sc8280xp-huawei-gaokun3.dtb"
-if [[ "$BUILD_EL2" == "true" && -n "$KREL_EL2" ]]; then
-  run_update_initramfs "$KREL_EL2" "sc8280xp-huawei-gaokun3-el2.dtb"
-fi
 
 rm -f /etc/machine-id
 systemd-machine-id-setup
@@ -208,44 +235,9 @@ MACHINE_ID="$(cat /etc/machine-id)"
 
 bootctl --no-variables --esp-path=/boot/efi install
 
-run_kernel_install() {
-  local krel="$1"
-  local image="$2"
-  local initrd="$3"
-  local dtb="$4"
-  local cmdline="$5"
-  local conf_root
-
-  conf_root="$(mktemp -d)"
-  cat > "$conf_root/install.conf" <<'EOF'
-layout=bls
-EOF
-  printf '%s\n' "$cmdline" > "$conf_root/cmdline"
-  printf 'qcom/%s\n' "$dtb" > "$conf_root/devicetree"
-
-  kernel-install --entry-token=machine-id remove "$krel" || true
-  KERNEL_INSTALL_CONF_ROOT="$conf_root" \
-    kernel-install --verbose --make-entry-directory=yes --entry-token=machine-id add \
-    "$krel" "$image" "$initrd"
-  rm -rf "$conf_root"
-}
-
-BASE_CMDLINE="$(cat /etc/kernel/cmdline)"
-run_kernel_install \
-  "$KREL" \
-  "/boot/vmlinuz-$KREL" \
-  "/boot/initrd.img-$KREL" \
-  "sc8280xp-huawei-gaokun3.dtb" \
-  "$BASE_CMDLINE"
-
+install_kernel_variant "$KREL" "sc8280xp-huawei-gaokun3.dtb"
 if [[ "$BUILD_EL2" == "true" && -n "$KREL_EL2" ]]; then
-  EL2_CMDLINE="${BASE_CMDLINE}"
-  run_kernel_install \
-    "$KREL_EL2" \
-    "/boot/vmlinuz-$KREL_EL2" \
-    "/boot/initrd.img-$KREL_EL2" \
-    "sc8280xp-huawei-gaokun3-el2.dtb" \
-    "$EL2_CMDLINE"
+  install_kernel_variant "$KREL_EL2" "sc8280xp-huawei-gaokun3-el2.dtb"
 fi
 
 cat > /boot/efi/loader/loader.conf <<EOF
