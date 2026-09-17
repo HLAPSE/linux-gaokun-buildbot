@@ -437,10 +437,6 @@ cat > /etc/kernel/cmdline <<EOF
 root=UUID=${ROOT_UUID} clk_ignore_unused pd_ignore_unused arm64.nopauth iommu.passthrough=0 iommu.strict=0 pcie_aspm.policy=powersupersave modprobe.blacklist=simpledrm efi=noruntime fbcon=rotate:1 usbhid.quirks=0x12d1:0x10b8:0x20000000 consoleblank=0 loglevel=4 psi=1
 EOF
 
-cat > /etc/kernel/devicetree <<EOF
-qcom/sc8280xp-huawei-gaokun3.dtb
-EOF
-
 systemctl enable gdm-monitor-sync.service \
     patch-nvm-bdaddr.service
 
@@ -463,18 +459,20 @@ EOF
 
 systemctl enable gaokun-fix-x11-unix.service
 
-run_update_initramfs() {
+# /etc/kernel/{install.conf,cmdline,devicetree} are kernel-install's default config
+# locations: switch the devicetree per kernel variant, then update-initramfs and
+# kernel-install reuse them in sequence - no temporary KERNEL_INSTALL_CONF_ROOT
+# directory is needed for each kernel-install invocation
+install_kernel_variant() {
     local krel="$1"
     local dtb="$2"
 
     printf 'qcom/%s\n' "$dtb" > /etc/kernel/devicetree
     update-initramfs -c -k "$krel"
+    kernel-install --entry-token=machine-id remove "$krel" || true
+    kernel-install --make-entry-directory=yes --entry-token=machine-id add \
+        "$krel" "/boot/vmlinuz-$krel" "/boot/initrd.img-$krel"
 }
-
-run_update_initramfs $KREL sc8280xp-huawei-gaokun3.dtb
-if [ -n "$KREL_EL2" ]; then
-    run_update_initramfs $KREL_EL2 sc8280xp-huawei-gaokun3-el2.dtb
-fi
 
 rm -f /etc/machine-id
 systemd-machine-id-setup
@@ -482,27 +480,13 @@ MACHINE_ID=$(cat /etc/machine-id)
 
 bootctl --no-variables --esp-path=/boot/efi install
 
-kernel-install --make-entry-directory=yes --entry-token=machine-id add \
-    $KREL /boot/vmlinuz-$KREL /boot/initrd.img-$KREL
+install_kernel_variant $KREL sc8280xp-huawei-gaokun3.dtb
 
 if [ -n "$KREL_EL2" ]; then
     mkdir -p /boot/efi/EFI/systemd/drivers
     mkdir -p /boot/efi/firmware/qcom/sc8280xp/HUAWEI/gaokun3
 
-    EL2_CONF_ROOT=$(mktemp -d)
-    cat > $EL2_CONF_ROOT/install.conf <<EOF
-layout=bls
-EOF
-    cat > $EL2_CONF_ROOT/cmdline <<EOF
-root=UUID=${ROOT_UUID} clk_ignore_unused pd_ignore_unused arm64.nopauth iommu.passthrough=0 iommu.strict=0 pcie_aspm.policy=powersupersave modprobe.blacklist=simpledrm efi=noruntime fbcon=rotate:1 usbhid.quirks=0x12d1:0x10b8:0x20000000 consoleblank=0 loglevel=4 psi=1
-EOF
-    cat > $EL2_CONF_ROOT/devicetree <<EOF
-qcom/sc8280xp-huawei-gaokun3-el2.dtb
-EOF
-    KERNEL_INSTALL_CONF_ROOT=$EL2_CONF_ROOT \
-        kernel-install --make-entry-directory=yes --entry-token=machine-id add \
-        $KREL_EL2 /boot/vmlinuz-$KREL_EL2 /boot/initrd.img-$KREL_EL2
-    rm -rf $EL2_CONF_ROOT
+    install_kernel_variant $KREL_EL2 sc8280xp-huawei-gaokun3-el2.dtb
 
     cp $GAOKUN_DIR/tools/el2/slbounceaa64.efi /boot/efi/EFI/systemd/drivers/
     cp $GAOKUN_DIR/tools/el2/qebspilaa64.efi /boot/efi/EFI/systemd/drivers/
