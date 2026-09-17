@@ -215,22 +215,19 @@ cat > /etc/kernel/cmdline <<EOF
 root=UUID=$ROOT_UUID clk_ignore_unused pd_ignore_unused arm64.nopauth iommu.passthrough=0 iommu.strict=0 pcie_aspm.policy=powersupersave modprobe.blacklist=simpledrm efi=noruntime fbcon=rotate:1 usbcore.autosuspend=-1 usbhid.quirks=0x12d1:0x10b8:0x20000000 consoleblank=0 loglevel=4 psi=1
 EOF
 
-cat > /etc/kernel/devicetree <<'EOF'
-qcom/sc8280xp-huawei-gaokun3.dtb
-EOF
-
-run_update_initramfs() {
+# /etc/kernel/{install.conf,cmdline,devicetree} 就是 kernel-install 的默认配置位置：
+# 按内核变体切换 devicetree 后，update-initramfs 与 kernel-install 依次复用，
+# 无需再为每次 kernel-install 构造临时 KERNEL_INSTALL_CONF_ROOT 目录
+install_kernel_variant() {
   local krel="$1"
   local dtb="$2"
 
   printf 'qcom/%s\n' "$dtb" > /etc/kernel/devicetree
   update-initramfs -c -k "$krel"
+  kernel-install --entry-token=machine-id remove "$krel" || true
+  kernel-install --verbose --make-entry-directory=yes --entry-token=machine-id add \
+    "$krel" "/boot/vmlinuz-$krel" "/boot/initrd.img-$krel"
 }
-
-run_update_initramfs "$KREL" "sc8280xp-huawei-gaokun3.dtb"
-if [[ "$BUILD_EL2" == "true" && -n "$KREL_EL2" ]]; then
-  run_update_initramfs "$KREL_EL2" "sc8280xp-huawei-gaokun3-el2.dtb"
-fi
 
 rm -f /etc/machine-id
 systemd-machine-id-setup
@@ -238,44 +235,9 @@ MACHINE_ID="$(cat /etc/machine-id)"
 
 bootctl --no-variables --esp-path=/boot/efi install
 
-run_kernel_install() {
-  local krel="$1"
-  local image="$2"
-  local initrd="$3"
-  local dtb="$4"
-  local cmdline="$5"
-  local conf_root
-
-  conf_root="$(mktemp -d)"
-  cat > "$conf_root/install.conf" <<'EOF'
-layout=bls
-EOF
-  printf '%s\n' "$cmdline" > "$conf_root/cmdline"
-  printf 'qcom/%s\n' "$dtb" > "$conf_root/devicetree"
-
-  kernel-install --entry-token=machine-id remove "$krel" || true
-  KERNEL_INSTALL_CONF_ROOT="$conf_root" \
-    kernel-install --verbose --make-entry-directory=yes --entry-token=machine-id add \
-    "$krel" "$image" "$initrd"
-  rm -rf "$conf_root"
-}
-
-BASE_CMDLINE="$(cat /etc/kernel/cmdline)"
-run_kernel_install \
-  "$KREL" \
-  "/boot/vmlinuz-$KREL" \
-  "/boot/initrd.img-$KREL" \
-  "sc8280xp-huawei-gaokun3.dtb" \
-  "$BASE_CMDLINE"
-
+install_kernel_variant "$KREL" "sc8280xp-huawei-gaokun3.dtb"
 if [[ "$BUILD_EL2" == "true" && -n "$KREL_EL2" ]]; then
-  EL2_CMDLINE="${BASE_CMDLINE}"
-  run_kernel_install \
-    "$KREL_EL2" \
-    "/boot/vmlinuz-$KREL_EL2" \
-    "/boot/initrd.img-$KREL_EL2" \
-    "sc8280xp-huawei-gaokun3-el2.dtb" \
-    "$EL2_CMDLINE"
+  install_kernel_variant "$KREL_EL2" "sc8280xp-huawei-gaokun3-el2.dtb"
 fi
 
 cat > /boot/efi/loader/loader.conf <<EOF
