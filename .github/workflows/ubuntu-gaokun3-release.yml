@@ -10,7 +10,7 @@ on:
       kernel_tag:
         description: Linux kernel tag
         required: true
-        default: "v7.2-rc2"
+        default: "v7.2.5"
       desktop_environment:
         description: Desktop environment metapackage
         required: true
@@ -18,7 +18,7 @@ on:
       extra_packages:
         description: Extra packages to install (space-separated)
         required: true
-        default: "language-pack-gnome-zh-hans fcitx5-chinese-addons gnome-tweaks gnome-shell-extension-manager mpv v4l-utils vim nano ripgrep git htop rsync mutter screen firefox"
+        default: "language-pack-gnome-zh-hans ibus-libpinyin gnome-tweaks gnome-shell-extension-manager mpv v4l-utils vim nano ripgrep git htop rsync mutter screen firefox systemd-zram-generator cloud-guest-utils"
       build_el2:
         description: Build and include optional -gaokun3-el2 kernel and EL2 EFI payloads
         required: true
@@ -53,8 +53,9 @@ jobs:
       DESKTOP_ENVIRONMENT: ${{ github.event.inputs.desktop_environment }}
       EXTRA_PACKAGES: ${{ github.event.inputs.extra_packages }}
       BUILD_EL2: ${{ github.event.inputs.build_el2 }}
-      IMAGE_SIZE: 12G
+      IMAGE_SIZE: 12G # 兜底值；实际由 "Compute image size" 步骤按 rootfs 用量动态覆盖
       IMAGE_CHUNK_SIZE: 1900M
+      ZSTD_LEVEL: 15 # -19 极慢；-15 压缩率基本持平，速度快约一倍
       GAOKUN_DIR: ${{ github.workspace }}
       WORKDIR: ${{ github.workspace }}/build-ubuntu
       ROOTFS_DIR: ${{ github.workspace }}/build-ubuntu/rootfs
@@ -71,121 +72,89 @@ jobs:
           set -euxo pipefail
           sudo apt-get update
           sudo apt-get install -y \
-            rsync kmod curl jq \
+            rsync kmod curl jq gnupg \
             parted dosfstools e2fsprogs zstd xz-utils python3
 
-      - name: Prepare build workspace
-        run: |
-          set -euxo pipefail
-          mkdir -p "$WORKDIR" "$ROOTFS_DIR" "$ARTIFACT_DIR"
-
-      - name: Resolve package release tag
+      # 解析包发布 tag（未随本次运行重建时）并下载 manifest + DEB
+      - name: Fetch gaokun package DEBs
         env:
           GITHUB_TOKEN: ${{ github.token }}
         run: |
           set -euxo pipefail
+          mkdir -p "$WORKDIR" "$ROOTFS_DIR" "$ARTIFACT_DIR" "$PACKAGE_DEBS_DIR"
 
-          if [[ "${{ github.event.inputs.rebuild_package_debs }}" == "true" ]]; then
-            package_release_tag="${{ needs.build-package-debs.outputs.package_release_tag }}"
-          else
-            safe_kernel_tag="${KERNEL_TAG//\//-}"
-            safe_kernel_tag="${safe_kernel_tag//[^A-Za-z0-9._-]/-}"
-            profile="std"
-            if [[ "$BUILD_EL2" == "true" ]]; then
-              profile="std-el2"
-            fi
-            prefix="gaokun3-debs-${safe_kernel_tag}-${profile}-"
-
-            releases_json="$WORKDIR/releases.json"
+          # GitHub API 认证 GET
+          api() {
             curl -fsSL \
               -H "Authorization: Bearer ${GITHUB_TOKEN}" \
               -H "Accept: application/vnd.github+json" \
-              "https://api.github.com/repos/${GITHUB_REPOSITORY}/releases?per_page=100" \
-              -o "$releases_json"
+              "$@"
+          }
 
-            package_release_tag="$(jq -r --arg prefix "$prefix" '.[] | select(.tag_name | startswith($prefix)) | .tag_name' "$releases_json" | head -n 1)"
-            if [[ -z "$package_release_tag" ]]; then
+          # 按附件名从 release JSON 解析下载地址并下载，缺失即失败
+          download_asset() {
+            local name="$1"
+            local out="$2"
+            local url
+            url="$(jq -r --arg name "$name" '.assets[] | select(.name == $name) | .url' "$release_json")"
+            if [[ -z "$url" || "$url" == "null" ]]; then
+              echo "missing asset ${name} in release ${PACKAGE_RELEASE_TAG}" >&2
+              exit 1
+            fi
+            curl -fsSL \
+              -H "Authorization: Bearer ${GITHUB_TOKEN}" \
+              -H "Accept: application/octet-stream" \
+              "$url" -o "$out"
+          }
+
+          if [[ "${{ github.event.inputs.rebuild_package_debs }}" != "true" ]]; then
+            # 未重建：按 kernel tag + profile 前缀取最近一次包发布
+            safe_kernel_tag="${KERNEL_TAG//\//-}"
+            safe_kernel_tag="${safe_kernel_tag//[^A-Za-z0-9._-]/-}"
+            profile="std"
+            [[ "$BUILD_EL2" == "true" ]] && profile="std-el2"
+            prefix="gaokun3-debs-${safe_kernel_tag}-${profile}-"
+
+            releases_json="$WORKDIR/releases.json"
+            api "https://api.github.com/repos/${GITHUB_REPOSITORY}/releases?per_page=100" -o "$releases_json"
+
+            PACKAGE_RELEASE_TAG="$(jq -r --arg prefix "$prefix" '.[] | select(.tag_name | startswith($prefix)) | .tag_name' "$releases_json" | head -n 1)"
+            if [[ -z "$PACKAGE_RELEASE_TAG" ]]; then
               echo "no package release found for prefix ${prefix}" >&2
               exit 1
             fi
+          else
+            # 本次已重建：直接用上游 job 产出的 tag
+            PACKAGE_RELEASE_TAG="${{ needs.build-package-debs.outputs.package_release_tag }}"
           fi
 
-          echo "PACKAGE_RELEASE_TAG=$package_release_tag" >> "$GITHUB_ENV"
-
-      - name: Download gaokun package DEBs
-        env:
-          GITHUB_TOKEN: ${{ github.token }}
-        run: |
-          set -euxo pipefail
-          mkdir -p "$PACKAGE_DEBS_DIR"
-
-          api_url="https://api.github.com/repos/${GITHUB_REPOSITORY}/releases/tags/${PACKAGE_RELEASE_TAG}"
           release_json="$WORKDIR/package-release.json"
-
-          curl -fsSL \
-            -H "Authorization: Bearer ${GITHUB_TOKEN}" \
-            -H "Accept: application/vnd.github+json" \
-            "$api_url" \
-            -o "$release_json"
-
-          asset_name="package-manifest.json"
-          asset_url="$(jq -r --arg name "$asset_name" '.assets[] | select(.name == $name) | .url' "$release_json")"
-
-          if [[ -z "$asset_url" || "$asset_url" == "null" ]]; then
-            echo "missing asset ${asset_name} in release ${PACKAGE_RELEASE_TAG}" >&2
-            exit 1
-          fi
-
-          curl -fsSL \
-            -H "Authorization: Bearer ${GITHUB_TOKEN}" \
-            -H "Accept: application/octet-stream" \
-            "$asset_url" \
-            -o "$PACKAGE_DEBS_DIR/$asset_name"
+          api "https://api.github.com/repos/${GITHUB_REPOSITORY}/releases/tags/${PACKAGE_RELEASE_TAG}" -o "$release_json"
 
           manifest_path="$PACKAGE_DEBS_DIR/package-manifest.json"
-          manifest_kernel_tag="$(jq -r '.kernel_tag' "$manifest_path")"
-          manifest_build_el2="$(jq -r '.build_el2' "$manifest_path")"
+          download_asset package-manifest.json "$manifest_path"
 
+          manifest_kernel_tag="$(jq -r '.kernel_tag' "$manifest_path")"
           if [[ "$manifest_kernel_tag" != "$KERNEL_TAG" ]]; then
             echo "package release kernel tag mismatch: expected ${KERNEL_TAG}, got ${manifest_kernel_tag}" >&2
             exit 1
           fi
-
-          if [[ "$BUILD_EL2" == "true" && "$manifest_build_el2" != "true" ]]; then
+          if [[ "$BUILD_EL2" == "true" && "$(jq -r '.build_el2' "$manifest_path")" != "true" ]]; then
             echo "package release ${PACKAGE_RELEASE_TAG} does not contain EL2 packages" >&2
             exit 1
           fi
 
-          asset_names=(
-            "$(jq -r '.kernels.standard.packages.image' "$manifest_path")"
-            "$(jq -r '.kernels.standard.packages.modules' "$manifest_path")"
-            "$(jq -r '.packages.firmware' "$manifest_path")"
+          deb_jq_paths=(
+            '.kernels.standard.packages.image'
+            '.kernels.standard.packages.modules'
+            '.packages.firmware'
           )
+          [[ "$BUILD_EL2" == "true" ]] && deb_jq_paths+=('.kernels.el2.packages.image' '.kernels.el2.packages.modules')
 
-          if [[ "$BUILD_EL2" == "true" ]]; then
-            asset_names+=(
-              "$(jq -r '.kernels.el2.packages.image' "$manifest_path")"
-              "$(jq -r '.kernels.el2.packages.modules' "$manifest_path")"
-            )
-          fi
-
-          for raw_name in "${asset_names[@]}"; do
-
-            # GitHub Release attachment names cannot contain '~' and are automatically replaced with '.'
-            asset_name="${raw_name//\~/.}"
-            
-            asset_url="$(jq -r --arg name "$asset_name" '.assets[] | select(.name == $name) | .url' "$release_json")"
-
-            if [[ -z "$asset_url" || "$asset_url" == "null" ]]; then
-              echo "missing asset ${asset_name} in release ${PACKAGE_RELEASE_TAG} (original name: ${raw_name})" >&2
-              exit 1
-            fi
-
-            curl -fsSL \
-              -H "Authorization: Bearer ${GITHUB_TOKEN}" \
-              -H "Accept: application/octet-stream" \
-              "$asset_url" \
-              -o "$PACKAGE_DEBS_DIR/$raw_name"
+          for jq_path in "${deb_jq_paths[@]}"; do
+            raw_name="$(jq -r "$jq_path" "$manifest_path")"
+            # GitHub Release 附件名不能含 '~'，上传时会被自动替换为 '.'
+            download_asset "${raw_name//\~/.}" "$PACKAGE_DEBS_DIR/$raw_name"
           done
 
       - name: Bootstrap Ubuntu rootfs
@@ -218,63 +187,69 @@ jobs:
           sudo mv "$ROOTFS_DIR/etc/resolv.conf" "$ROOTFS_DIR/etc/resolv.conf.bak"
           sudo cp /run/systemd/resolve/resolv.conf "$ROOTFS_DIR/etc/resolv.conf"
 
+          # mozilla apt 仓库（Firefox deb）：密钥与 sources 在 host 侧预先写入 rootfs，
+          # chroot 内只需一次 apt-get update 即可同时解析 Ubuntu 官方与 mozilla 仓库
+          curl -fsSL https://packages.mozilla.org/apt/repo-signing-key.gpg | \
+            gpg --dearmor -o "$WORKDIR/packages.mozilla.org.gpg"
+          sudo install -Dm644 "$WORKDIR/packages.mozilla.org.gpg" \
+            "$ROOTFS_DIR/etc/apt/keyrings/packages.mozilla.org.gpg"
+
+          printf "%s\n" \
+            "deb [signed-by=/etc/apt/keyrings/packages.mozilla.org.gpg] https://packages.mozilla.org/apt mozilla main" \
+            | sudo tee "$ROOTFS_DIR/etc/apt/sources.list.d/mozilla.list" >/dev/null
+
+          printf "%s\n" \
+            "Package: *" \
+            "Pin: origin packages.mozilla.org" \
+            "Pin-Priority: 1000" \
+            | sudo tee "$ROOTFS_DIR/etc/apt/preferences.d/mozilla" >/dev/null
+
           sudo mount --bind /dev "$ROOTFS_DIR/dev"
           sudo mount --bind /dev/pts "$ROOTFS_DIR/dev/pts"
           sudo mount -t proc proc "$ROOTFS_DIR/proc"
           sudo mount -t sysfs sys "$ROOTFS_DIR/sys"
           sudo mount -t tmpfs tmpfs "$ROOTFS_DIR/run"
 
-          sudo chroot "$ROOTFS_DIR" /usr/bin/env UBUNTU_RELEASE="$UBUNTU_RELEASE" /bin/bash -euxo pipefail -c '
-            export DEBIAN_FRONTEND=noninteractive
+          # 交互变量通过 env 传入 chroot，避免在单引号脚本里做引号拼接
+          sudo chroot "$ROOTFS_DIR" /usr/bin/env \
+            UBUNTU_RELEASE="$UBUNTU_RELEASE" \
+            DESKTOP_ENVIRONMENT="$DESKTOP_ENVIRONMENT" \
+            EXTRA_PACKAGES="$EXTRA_PACKAGES" \
+            /bin/bash -euxo pipefail -c '
+              export DEBIAN_FRONTEND=noninteractive
 
-            apt-get update
-            apt-get install -y locales
-            sed -i "s/# zh_CN.UTF-8/zh_CN.UTF-8/" /etc/locale.gen
-            locale-gen
-            update-locale LANG=zh_CN.UTF-8 LANGUAGE=zh_CN:en_US:en LC_MESSAGES=zh_CN.UTF-8
+              apt-get update
+              apt-get install -y locales
+              sed -i "s/# zh_CN.UTF-8/zh_CN.UTF-8/" /etc/locale.gen
+              locale-gen
+              update-locale LANG=zh_CN.UTF-8 LANGUAGE=zh_CN:en_US:en LC_MESSAGES=zh_CN.UTF-8
 
-            apt-get install -y \
-              linux-base initramfs-tools kmod
+              apt-get install -y linux-base initramfs-tools kmod
+              apt-get install -y --no-install-recommends systemd-boot systemd-boot-efi
 
-            apt-get install -y --no-install-recommends \
-              systemd-boot systemd-boot-efi
+              # Base system tools (not user-configurable)
+              apt-get install -y \
+                iputils-ping iproute2 net-tools dnsutils traceroute \
+                xz-utils unzip zip bzip2 zstd p7zip-full \
+                wget curl ca-certificates gnupg lsb-release \
+                ssh less file sudo
 
-            # Base system tools (not user-configurable)
-            apt-get install -y \
-              iputils-ping iproute2 net-tools dnsutils traceroute \
-              xz-utils unzip zip bzip2 zstd p7zip-full \
-              wget curl ca-certificates gnupg lsb-release \
-              ssh less file sudo
+              # dconf-cli: required by the image configuration step (dconf update writes screen-keyboard defaults)
+              apt-get install -y dconf-cli
 
-            install -d -m 0755 /etc/apt/keyrings
-            wget -qO- https://packages.mozilla.org/apt/repo-signing-key.gpg | \
-              gpg --dearmor -o /etc/apt/keyrings/packages.mozilla.org.gpg
+              apt-get install -y \
+                "$DESKTOP_ENVIRONMENT" \
+                fonts-noto-cjk fonts-noto-color-emoji \
+                gstreamer1.0-libav gstreamer1.0-plugins-ugly \
+                alsa-utils pipewire-alsa \
+                $EXTRA_PACKAGES
 
-            printf "%s\n" \
-              "deb [signed-by=/etc/apt/keyrings/packages.mozilla.org.gpg] https://packages.mozilla.org/apt mozilla main" \
-              > /etc/apt/sources.list.d/mozilla.list
-
-            printf "%s\n" \
-              "Package: *" \
-              "Pin: origin packages.mozilla.org" \
-              "Pin-Priority: 1000" \
-              > /etc/apt/preferences.d/mozilla
-
-            apt-get update
-
-            apt-get install -y \
-              '"$DESKTOP_ENVIRONMENT"' \
-              fonts-noto-cjk fonts-noto-color-emoji \
-              gstreamer1.0-libav gstreamer1.0-plugins-ugly \
-              alsa-utils pipewire-alsa \
-              '"$EXTRA_PACKAGES"'
-
-            if dpkg --compare-versions "${UBUNTU_RELEASE}" gt "25.10"; then
+              if dpkg --compare-versions "${UBUNTU_RELEASE}" gt "25.10"; then
                 # We use ptyxis instead of gnome-terminal
                 apt purge --auto-remove -y gnome-terminal
-            fi
-            apt-get clean
-          '
+              fi
+              apt-get clean
+            '
 
           cleanup
           trap - EXIT
@@ -283,32 +258,32 @@ jobs:
         run: |
           set -euxo pipefail
           manifest_path="$PACKAGE_DEBS_DIR/package-manifest.json"
-          manifest_kernel_release="$(jq -r '.kernels.standard.release' "$manifest_path")"
-          image_deb_name="$(jq -r '.kernels.standard.packages.image' "$manifest_path")"
-          modules_deb_name="$(jq -r '.kernels.standard.packages.modules' "$manifest_path")"
-          firmware_deb_name="$(jq -r '.packages.firmware' "$manifest_path")"
-          echo "$manifest_kernel_release" > "$WORKDIR/kernel-release.txt"
 
-          el2_kernel_release=""
-          el2_image_deb_name=""
-          el2_modules_deb_name=""
+          kernel_release="$(jq -r '.kernels.standard.release' "$manifest_path")"
+          echo "$kernel_release" > "$WORKDIR/kernel-release.txt"
+
+          deb_names=(
+            "$(jq -r '.kernels.standard.packages.image' "$manifest_path")"
+            "$(jq -r '.kernels.standard.packages.modules' "$manifest_path")"
+            "$(jq -r '.packages.firmware' "$manifest_path")"
+          )
+          kernel_releases=("$kernel_release")
+
           if [[ "$BUILD_EL2" == "true" ]]; then
             el2_kernel_release="$(jq -r '.kernels.el2.release' "$manifest_path")"
-            el2_image_deb_name="$(jq -r '.kernels.el2.packages.image' "$manifest_path")"
-            el2_modules_deb_name="$(jq -r '.kernels.el2.packages.modules' "$manifest_path")"
             echo "$el2_kernel_release" > "$WORKDIR/kernel-release-el2.txt"
+            deb_names+=(
+              "$(jq -r '.kernels.el2.packages.image' "$manifest_path")"
+              "$(jq -r '.kernels.el2.packages.modules' "$manifest_path")"
+            )
+            kernel_releases+=("$el2_kernel_release")
           else
             rm -f "$WORKDIR/kernel-release-el2.txt"
           fi
 
-          # Install DEBs directly into the rootfs using dpkg
-          sudo cp "$PACKAGE_DEBS_DIR/$image_deb_name" "$ROOTFS_DIR/tmp/"
-          sudo cp "$PACKAGE_DEBS_DIR/$modules_deb_name" "$ROOTFS_DIR/tmp/"
-          sudo cp "$PACKAGE_DEBS_DIR/$firmware_deb_name" "$ROOTFS_DIR/tmp/"
-          if [[ "$BUILD_EL2" == "true" ]]; then
-            sudo cp "$PACKAGE_DEBS_DIR/$el2_image_deb_name" "$ROOTFS_DIR/tmp/"
-            sudo cp "$PACKAGE_DEBS_DIR/$el2_modules_deb_name" "$ROOTFS_DIR/tmp/"
-          fi
+          for deb_name in "${deb_names[@]}"; do
+            sudo cp "$PACKAGE_DEBS_DIR/$deb_name" "$ROOTFS_DIR/tmp/"
+          done
 
           sudo mount --bind /dev "$ROOTFS_DIR/dev"
           sudo mount --bind /dev/pts "$ROOTFS_DIR/dev/pts"
@@ -316,56 +291,66 @@ jobs:
           sudo mount -t sysfs sys "$ROOTFS_DIR/sys"
           sudo mount -t tmpfs tmpfs "$ROOTFS_DIR/run"
 
-          chroot_debs="/tmp/$image_deb_name /tmp/$modules_deb_name /tmp/$firmware_deb_name"
-          if [[ "$BUILD_EL2" == "true" ]]; then
-            chroot_debs="$chroot_debs /tmp/$el2_image_deb_name /tmp/$el2_modules_deb_name"
+          # DEB 文件名不含空白，容器内靠分词展开
+          chroot_debs="$(printf ' /tmp/%s' "${deb_names[@]}")"
+          sudo chroot "$ROOTFS_DIR" /usr/bin/env \
+            CHROOT_DEBS="$chroot_debs" \
+            KERNEL_RELEASES="${kernel_releases[*]}" \
+            /bin/bash -euxo pipefail -c '
+              dpkg -i $CHROOT_DEBS
+              rm -f /tmp/*.deb
+              for krel in $KERNEL_RELEASES; do
+                depmod -a "$krel"
+              done
+            '
+
+          sudo umount "$ROOTFS_DIR/dev/pts" "$ROOTFS_DIR/dev" "$ROOTFS_DIR/proc" "$ROOTFS_DIR/sys" "$ROOTFS_DIR/run"
+
+      - name: Slim rootfs (remove caches, logs, docs before imaging)
+        run: |
+          set -euxo pipefail
+          sudo find "$ROOTFS_DIR/usr/share/doc" -type f \( -name '*.gz' -o -name 'changelog*' -o -name 'copyright' \) -delete 2>/dev/null || true
+          sudo find "$ROOTFS_DIR/usr/share/man" -type f \( -name '*.gz' -o -name '*.bz2' \) -delete 2>/dev/null || true
+          sudo rm -rf \
+            "$ROOTFS_DIR/var/lib/apt/lists" \
+            "$ROOTFS_DIR/var/log/apt" \
+            "$ROOTFS_DIR/var/log/journal"
+          # 只清空内容、保留目录本身与权限位：后续 chroot 步骤的 mktemp、镜像内运行时都依赖 /tmp、/var/tmp、/var/cache
+          sudo find "$ROOTFS_DIR/tmp" "$ROOTFS_DIR/var/tmp" "$ROOTFS_DIR/var/cache" -mindepth 1 -delete 2>/dev/null || true
+          sudo du -sh "$ROOTFS_DIR"
+
+      - name: Compute image size from rootfs usage
+        run: |
+          set -euxo pipefail
+          used_kib="$(sudo du -sk "$ROOTFS_DIR" | cut -f1)"
+          # rootfs 用量 + ext4 元数据余量 10% + 2GiB 冗余 + 1GiB ESP，向上取整到 GiB，下限 8G
+          want_bytes=$(( (used_kib * 1024 / 10 + used_kib * 1024 + 2 * 1024 * 1024 * 1024 + 1024 * 1024 * 1024 + (1024 * 1024 * 1024 - 1)) / (1024 * 1024 * 1024) * 1024 * 1024 * 1024 ))
+          want_gib=$(( want_bytes / 1024 / 1024 / 1024 ))
+          if (( want_gib < 8 )); then
+            want_gib=8
           fi
-
-          sudo chroot "$ROOTFS_DIR" /bin/bash -euxo pipefail -c '
-            dpkg -i '"$chroot_debs"'
-            rm -f /tmp/*.deb
-            depmod -a '"$manifest_kernel_release"'
-            '"$(if [[ "$BUILD_EL2" == "true" ]]; then printf 'depmod -a %q\n' "$el2_kernel_release"; fi)"'
-          '
-
-          sudo umount "$ROOTFS_DIR/dev/pts"
-          sudo umount "$ROOTFS_DIR/dev"
-          sudo umount "$ROOTFS_DIR/proc"
-          sudo umount "$ROOTFS_DIR/sys"
-          sudo umount "$ROOTFS_DIR/run"
+          echo "IMAGE_SIZE=${want_gib}G" >> "$GITHUB_ENV"
+          echo "image size: ${want_gib}G (rootfs usage: $(( used_kib / 1024 ))MiB)"
 
       - name: Create disk image and configure boot
-        run: |
-          chmod +x scripts/ci/50_make_image_ubuntu.sh
-          scripts/ci/50_make_image_ubuntu.sh
+        run: scripts/ci/50_make_image_ubuntu.sh
 
+      # 输出 tag_name / kernel_release / package_glob 到 GITHUB_OUTPUT
       - name: Package image and generate release info
         id: package
-        run: |
-          chmod +x scripts/ci/60_package_release_ubuntu.sh
-          scripts/ci/60_package_release_ubuntu.sh
-          TAG_NAME="$(cat "$WORKDIR/tag-name.txt")"
-          KREL="$(cat "$WORKDIR/kernel-release-export.txt")"
-          PACKAGE_GLOB="$(cat "$WORKDIR/package-glob.txt")"
-          RELEASE_BODY_FILE="$(cat "$WORKDIR/release-body-file.txt")"
-          echo "tag_name=$TAG_NAME" >> "$GITHUB_OUTPUT"
-          echo "artifact_dir=$ARTIFACT_DIR" >> "$GITHUB_OUTPUT"
-          echo "kernel_release=$KREL" >> "$GITHUB_OUTPUT"
-          echo "package_glob=$PACKAGE_GLOB" >> "$GITHUB_OUTPUT"
-          echo "release_body_file=$RELEASE_BODY_FILE" >> "$GITHUB_OUTPUT"
+        run: scripts/ci/60_package_release_ubuntu.sh
 
       - name: Upload build artifacts (workflow)
         uses: actions/upload-artifact@v6
         with:
           name: ubuntu-gaokun3-build
-          path: |
-            ${{ steps.package.outputs.artifact_dir }}/${{ steps.package.outputs.package_glob }}
+          compression-level: 0 # .zst 已是压缩数据，跳过 zip 打包的重复压缩
+          path: ${{ env.ARTIFACT_DIR }}/${{ steps.package.outputs.package_glob }}
 
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v2.6.1
         with:
           tag_name: ${{ steps.package.outputs.tag_name }}
           name: Ubuntu ${{ env.UBUNTU_RELEASE }} - gaokun3 - ${{ steps.package.outputs.kernel_release }}
-          body_path: ${{ steps.package.outputs.artifact_dir }}/${{ steps.package.outputs.release_body_file }}
-          files: |
-            ${{ steps.package.outputs.artifact_dir }}/${{ steps.package.outputs.package_glob }}
+          body_path: ${{ env.ARTIFACT_DIR }}/release-body.md
+          files: ${{ env.ARTIFACT_DIR }}/${{ steps.package.outputs.package_glob }}

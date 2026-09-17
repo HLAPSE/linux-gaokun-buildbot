@@ -56,7 +56,9 @@ snapshot_tree() {
 
   rm -rf "$dst_dir"
   mkdir -p "$dst_dir"
-  cp -a "$src_dir"/. "$dst_dir"/
+  # 只快照工作树：BASE 树仅供后续 modules_install / headers 打包使用（打包脚本均显式排除 .git）。
+  # 复制 .git 会把后台 git gc 正在重整的对象卷进竞态，也白白多拷约 1GB
+  rsync -a --exclude '.git' "$src_dir"/ "$dst_dir"/
 }
 
 mkdir -p "$WORKDIR"
