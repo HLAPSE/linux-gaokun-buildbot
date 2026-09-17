@@ -266,11 +266,9 @@ jobs:
           set -euxo pipefail
           sudo find "$ROOTFS_DIR/usr/share/doc" -type f \( -name '*.gz' -o -name 'changelog*' -o -name 'README*' -o -name 'LICENSE*' \) -delete 2>/dev/null || true
           sudo find "$ROOTFS_DIR/usr/share/man" -type f \( -name '*.gz' -o -name '*.bz2' -o -name '*.zst' \) -delete 2>/dev/null || true
-          sudo rm -rf \
-            "$ROOTFS_DIR/var/cache/dnf" \
-            "$ROOTFS_DIR/var/log/journal" \
-            "$ROOTFS_DIR/var/tmp" \
-            "$ROOTFS_DIR/tmp"
+          sudo rm -rf "$ROOTFS_DIR/var/log/journal"
+          # 只清空内容、保留目录本身与权限位：后续 chroot 步骤、镜像内运行时都依赖 /tmp、/var/tmp、/var/cache
+          sudo find "$ROOTFS_DIR/tmp" "$ROOTFS_DIR/var/tmp" "$ROOTFS_DIR/var/cache" -mindepth 1 -delete 2>/dev/null || true
           sudo du -sh "$ROOTFS_DIR"
 
       - name: Compute image size from rootfs usage

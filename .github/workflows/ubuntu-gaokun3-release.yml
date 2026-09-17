@@ -313,12 +313,10 @@ jobs:
           sudo find "$ROOTFS_DIR/usr/share/man" -type f \( -name '*.gz' -o -name '*.bz2' \) -delete 2>/dev/null || true
           sudo rm -rf \
             "$ROOTFS_DIR/var/lib/apt/lists" \
-            "$ROOTFS_DIR/var/cache/apt/archives" \
             "$ROOTFS_DIR/var/log/apt" \
-            "$ROOTFS_DIR/var/log/journal" \
-            "$ROOTFS_DIR/var/tmp" \
-            "$ROOTFS_DIR/tmp" \
-            "$ROOTFS_DIR/var/cache"
+            "$ROOTFS_DIR/var/log/journal"
+          # 只清空内容、保留目录本身与权限位：后续 chroot 步骤的 mktemp、镜像内运行时都依赖 /tmp、/var/tmp、/var/cache
+          sudo find "$ROOTFS_DIR/tmp" "$ROOTFS_DIR/var/tmp" "$ROOTFS_DIR/var/cache" -mindepth 1 -delete 2>/dev/null || true
           sudo du -sh "$ROOTFS_DIR"
 
       - name: Compute image size from rootfs usage
