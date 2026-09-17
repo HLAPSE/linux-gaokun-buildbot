@@ -89,9 +89,15 @@ fi
 
 sudo chown "$(id -u):$(id -g)" "$RELEASE_BODY_FILE"
 
-TAG_NAME="fedora${FEDORA_RELEASE}-${KREL}$(if [[ "$BUILD_EL2" == "true" ]]; then printf -- '-el2'; fi)-$(date -u +%Y%m%d%H%M%S)"
+el2_suffix=""
+[[ "$BUILD_EL2" == "true" ]] && el2_suffix="-el2"
+TAG_NAME="fedora${FEDORA_RELEASE}-${KREL}${el2_suffix}-$(date -u +%Y%m%d%H%M%S)"
 
-echo "$TAG_NAME" > "$WORKDIR/tag-name.txt"
-echo "$KREL" > "$WORKDIR/kernel-release-export.txt"
-echo "$PACKAGE_GLOB" > "$WORKDIR/package-glob.txt"
-echo "$(basename "$RELEASE_BODY_FILE")" > "$WORKDIR/release-body-file.txt"
+# workflow 从 GITHUB_OUTPUT 读取发布信息；本地构建没有该变量时跳过
+if [[ -n "${GITHUB_OUTPUT:-}" ]]; then
+  {
+    echo "tag_name=$TAG_NAME"
+    echo "kernel_release=$KREL"
+    echo "package_glob=$PACKAGE_GLOB"
+  } >> "$GITHUB_OUTPUT"
+fi
