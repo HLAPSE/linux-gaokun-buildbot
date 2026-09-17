@@ -55,6 +55,7 @@ jobs:
       BUILD_EL2: ${{ github.event.inputs.build_el2 }}
       IMAGE_SIZE: 12G # 兜底值；实际由 "Compute image size" 步骤按 rootfs 用量动态覆盖
       IMAGE_CHUNK_SIZE: 1900M
+      ZSTD_LEVEL: 15 # -19 极慢；-15 压缩率基本持平，速度快约一倍
       GAOKUN_DIR: ${{ github.workspace }}
       WORKDIR: ${{ github.workspace }}/build-ubuntu
       ROOTFS_DIR: ${{ github.workspace }}/build-ubuntu/rootfs
@@ -396,6 +397,7 @@ jobs:
         uses: actions/upload-artifact@v6
         with:
           name: ubuntu-gaokun3-build
+          compression-level: 0 # .zst 已是压缩数据，跳过 zip 打包的重复压缩
           path: |
             ${{ steps.package.outputs.artifact_dir }}/${{ steps.package.outputs.package_glob }}
 
