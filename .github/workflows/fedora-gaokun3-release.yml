@@ -286,6 +286,19 @@ jobs:
             sudo depmod -b "$ROOTFS_DIR" -a "$el2_kernel_release"
           fi
 
+      - name: Slim rootfs (remove caches, logs, docs before imaging)
+        run: |
+          set -euxo pipefail
+          # drop doc examples / manual pages we don't need
+          find "$ROOTFS_DIR/usr/share/doc" -type f \( -name '*.gz' -o -name 'changelog*' -o -name 'README*' -o -name 'LICENSE*' \) -delete 2>/dev/null || true
+          find "$ROOTFS_DIR/usr/share/man" -type f \( -name '*.gz' -o -name '*.bz2' -o -name '*.zst' \) -delete 2>/dev/null || true
+          rm -rf \
+            "$ROOTFS_DIR/var/cache/dnf" \
+            "$ROOTFS_DIR/var/log/journal" \
+            "$ROOTFS_DIR/var/tmp" \
+            "$ROOTFS_DIR/tmp"
+          sudo du -sh "$ROOTFS_DIR"
+
       - name: Create disk image and configure boot
         run: |
           chmod +x scripts/ci/50_make_image_fedora.sh
