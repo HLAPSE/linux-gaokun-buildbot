@@ -56,7 +56,7 @@ Windows 一般可由 `systemd-boot` 自动探测，所以无需额外修改 Wind
 
 - 重启后应进入 `systemd-boot` 启动菜单。
 - 菜单中可选择启动 Windows 或 Linux 发行版。
-- 进入 Linux 发行版后可以使用 gnome-disk 等磁盘工具或 growpart/resize2fs/btrfs 等命令扩容 rootfs 分区和文件系统到整个剩余空间。
+- 进入 Linux 后，`gaokun-grow-rootfs.service` 会在首次启动时自动把 rootfs 扩容到目标分区的全部空间（分区后部若有空隙也会一并扩入）。若自动扩容未生效，可使用 gnome-disks 或手动执行 `growpart`/`resize2fs`/`btrfs filesystem resize max /`。
 
 ## 补充说明（EL2 可选）
 

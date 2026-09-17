@@ -224,7 +224,8 @@ apt-get install -y \
     language-pack-gnome-zh-hans \
     fonts-noto-cjk \
     fonts-noto-color-emoji \
-    fcitx5-chinese-addons \
+    ibus-libpinyin \
+    dconf-cli \
     gnome-tweaks gnome-shell-extension-manager \
     mpv v4l-utils vim nano ripgrep git htop screen \
     alsa-utils pipewire-alsa \
@@ -322,7 +323,7 @@ sudo cp $GAOKUN_DIR/tools/audio/sc8280xp.conf \
 
 # Shared image assets used by the CI image pipeline
 sudo mkdir -p $ROOTFS_DIR/usr/local/share/gaokun
-sudo cp -a $GAOKUN_DIR/tools/image-assets/etc/. \
+sudo cp -a --no-preserve=ownership $GAOKUN_DIR/tools/image-assets/etc/. \
     $ROOTFS_DIR/etc/
 sudo cp $GAOKUN_DIR/tools/image-assets/usr/local/share/gaokun/monitors.xml \
     $ROOTFS_DIR/usr/local/share/gaokun/monitors.xml
@@ -394,7 +395,7 @@ sudo mount ${LOOP}p2 $MNT
 sudo mkdir -p $MNT/boot/efi
 sudo mount ${LOOP}p1 $MNT/boot/efi
 
-sudo rsync -aHAX --info=progress2 --exclude='/proc/*' --exclude='/sys/*' --exclude='/dev/*' --exclude='/run/*' $ROOTFS_DIR/ $MNT/
+sudo rsync -aHAX --chown=root:root --info=progress2 --exclude='/proc/*' --exclude='/sys/*' --exclude='/dev/*' --exclude='/run/*' $ROOTFS_DIR/ $MNT/
 
 sudo tee $MNT/etc/fstab > /dev/null <<EOF
 UUID=${ROOT_UUID}  /         ext4   errors=remount-ro,noatime  0  1
@@ -436,12 +437,11 @@ cat > /etc/kernel/cmdline <<EOF
 root=UUID=${ROOT_UUID} clk_ignore_unused pd_ignore_unused arm64.nopauth iommu.passthrough=0 iommu.strict=0 pcie_aspm.policy=powersupersave modprobe.blacklist=simpledrm efi=noruntime fbcon=rotate:1 usbhid.quirks=0x12d1:0x10b8:0x20000000 consoleblank=0 loglevel=4 psi=1
 EOF
 
-cat > /etc/kernel/devicetree <<EOF
-qcom/sc8280xp-huawei-gaokun3.dtb
-EOF
-
 systemctl enable gdm-monitor-sync.service \
     patch-nvm-bdaddr.service
+
+# Desktop images do not need to block on network being online; this waits 7s+ on Wi-Fi
+systemctl disable NetworkManager-wait-online.service || true
 
 cat > /etc/systemd/system/gaokun-fix-x11-unix.service <<'EOF'
 [Unit]
@@ -459,18 +459,20 @@ EOF
 
 systemctl enable gaokun-fix-x11-unix.service
 
-run_update_initramfs() {
+# /etc/kernel/{install.conf,cmdline,devicetree} are kernel-install's default config
+# locations: switch the devicetree per kernel variant, then update-initramfs and
+# kernel-install reuse them in sequence - no temporary KERNEL_INSTALL_CONF_ROOT
+# directory is needed for each kernel-install invocation
+install_kernel_variant() {
     local krel="$1"
     local dtb="$2"
 
     printf 'qcom/%s\n' "$dtb" > /etc/kernel/devicetree
     update-initramfs -c -k "$krel"
+    kernel-install --entry-token=machine-id remove "$krel" || true
+    kernel-install --make-entry-directory=yes --entry-token=machine-id add \
+        "$krel" "/boot/vmlinuz-$krel" "/boot/initrd.img-$krel"
 }
-
-run_update_initramfs $KREL sc8280xp-huawei-gaokun3.dtb
-if [ -n "$KREL_EL2" ]; then
-    run_update_initramfs $KREL_EL2 sc8280xp-huawei-gaokun3-el2.dtb
-fi
 
 rm -f /etc/machine-id
 systemd-machine-id-setup
@@ -478,27 +480,13 @@ MACHINE_ID=$(cat /etc/machine-id)
 
 bootctl --no-variables --esp-path=/boot/efi install
 
-kernel-install --make-entry-directory=yes --entry-token=machine-id add \
-    $KREL /boot/vmlinuz-$KREL /boot/initrd.img-$KREL
+install_kernel_variant $KREL sc8280xp-huawei-gaokun3.dtb
 
 if [ -n "$KREL_EL2" ]; then
     mkdir -p /boot/efi/EFI/systemd/drivers
     mkdir -p /boot/efi/firmware/qcom/sc8280xp/HUAWEI/gaokun3
 
-    EL2_CONF_ROOT=$(mktemp -d)
-    cat > $EL2_CONF_ROOT/install.conf <<EOF
-layout=bls
-EOF
-    cat > $EL2_CONF_ROOT/cmdline <<EOF
-root=UUID=${ROOT_UUID} clk_ignore_unused pd_ignore_unused arm64.nopauth iommu.passthrough=0 iommu.strict=0 pcie_aspm.policy=powersupersave modprobe.blacklist=simpledrm efi=noruntime fbcon=rotate:1 usbhid.quirks=0x12d1:0x10b8:0x20000000 consoleblank=0 loglevel=4 psi=1
-EOF
-    cat > $EL2_CONF_ROOT/devicetree <<EOF
-qcom/sc8280xp-huawei-gaokun3-el2.dtb
-EOF
-    KERNEL_INSTALL_CONF_ROOT=$EL2_CONF_ROOT \
-        kernel-install --make-entry-directory=yes --entry-token=machine-id add \
-        $KREL_EL2 /boot/vmlinuz-$KREL_EL2 /boot/initrd.img-$KREL_EL2
-    rm -rf $EL2_CONF_ROOT
+    install_kernel_variant $KREL_EL2 sc8280xp-huawei-gaokun3-el2.dtb
 
     cp $GAOKUN_DIR/tools/el2/slbounceaa64.efi /boot/efi/EFI/systemd/drivers/
     cp $GAOKUN_DIR/tools/el2/qebspilaa64.efi /boot/efi/EFI/systemd/drivers/
@@ -527,6 +515,26 @@ Notes:
 - Default uses `--entry-token=machine-id`, so final entry filenames will be `/boot/efi/loader/entries/<machine-id>-<kernel-release>.conf`.
 - Kernel, `initrd` and DTB will be automatically copied to `/boot/efi/<machine-id>/<kernel-release>/`; this is the standard BLS Type #1 directory layout.
 
+### Chinese Input Method (GNOME native ibus + on-screen keyboard) Presets
+
+Targeting the "touch-only Chinese input" scenario on this device, the image ships the following defaults. All are user-space and kernel-independent, shared between Ubuntu and Fedora builds:
+
+- **CJK fonts**: `fonts-noto-cjk` (already in the base package list) so Chinese candidates/UI never render as boxes.
+- **Chinese input**: native GNOME ibus — `/etc/dconf/db/local.d/01-input-sources` presets the input sources to "US keyboard + Intelligent Pinyin (libpinyin)"; `ibus-libpinyin` is in the package list. Switch languages with Super+Space.
+- **On-screen keyboard**: `/etc/dconf/db/local.d/00-screen-keyboard` sets `screen-keyboard-enabled=true`, so tapping a text field with the touchscreen brings up the OSK.
+- **dconf default profile**: `/etc/dconf/profile/user` (`user-db:user` + `system-db:local`). Without this file dconf cannot find the system database and all the defaults above silently fail.
+
+> **Why not fcitx5**: under GNOME Wayland the OSK depends on the Shell's text-input→ibus chain. `GTK_IM_MODULE=fcitx` makes apps bypass that protocol and talk to fcitx5 directly, and fcitx5's ibus compatibility frontend grabs the `org.freedesktop.IBus` bus name — either breaks touch-triggered OSK (verified on device).
+
+For manual builds, place the 3 small files above into `$ROOTFS_DIR` at their paths, and append the following at the end of "Step 4 chroot initialization" to make them take effect:
+
+```bash
+# dconf-cli is included in the Step 3 package list; a "command not found" means it was missed
+dconf update
+```
+
+> Candidate panel appearance can be adjusted per user in "Settings → Keyboard → Input Sources" and the ibus settings after first boot.
+
 ### 4. Final Cleanup
 
 ```bash
@@ -542,3 +550,4 @@ sudo losetup -d $LOOP
 - For dual boot EFI overlay method, refer to [dual_boot_guide_en.md](dual_boot_guide_en.md)
 - EL2 support is already included when you also build the `-gaokun3-el2` kernel variant in this guide.
 - Refer to [el2_kvm_guide_en.md](el2_kvm_guide_en.md) for implementation details, boot-chain structure, and debugging notes.
+- CI-built images ship a default `user` account (password `user`, passwordless sudo); change the password with `passwd` soon after first boot.
