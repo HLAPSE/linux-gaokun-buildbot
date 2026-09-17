@@ -117,10 +117,22 @@ jobs:
           chmod +x scripts/ci/70_build_package_debs.sh
           scripts/ci/70_build_package_debs.sh
 
+      # 上传/发布阶段只读 ARTIFACT_DIR；内核树、构建输出与打包 staging 在此已无用。
+      # 构建累计占用 15G+，ARM runner 磁盘紧张，不清理会导致后续步骤创建临时目录失败（ENOSPC）
+      - name: Free disk space before uploads
+        run: |
+          set -euxo pipefail
+          sudo rm -rf \
+            "$KERN_SRC" "$KERN_SRC_BASE" "$KERN_OUT" "$KERN_OUT_EL2" \
+            "$WORKDIR/debbuild" "$WORKDIR/package-buildroots" \
+            "$WORKDIR/linux.tar.xz"
+          df -h /
+
       - name: Upload build artifacts (workflow)
         uses: actions/upload-artifact@v6
         with:
           name: gaokun3-package-debs
+          compression-level: 0 # DEB 内部已是 xz/zstd 压缩数据，跳过 zip 二次压缩省临时盘与时间
           path: |
             ${{ env.ARTIFACT_DIR }}/*.deb
             ${{ env.ARTIFACT_DIR }}/package-manifest.json
