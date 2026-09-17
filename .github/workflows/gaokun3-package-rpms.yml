@@ -158,15 +158,24 @@ jobs:
             ${{ env.ARTIFACT_DIR }}/package-release-body.md
 
       - name: Publish package release
-        uses: softprops/action-gh-release@v2.6.1
-        with:
-          tag_name: ${{ steps.release_meta.outputs.package_release_tag }}
-          name: gaokun3 package RPMs - ${{ env.KERNEL_TAG }}${{ env.BUILD_EL2 == 'true' && ' + EL2' || '' }}
-          body_path: ${{ env.ARTIFACT_DIR }}/package-release-body.md
-          prerelease: false
-          make_latest: false
-          append_body: false
-          overwrite_files: true
-          files: |
-            ${{ env.ARTIFACT_DIR }}/*.rpm
-            ${{ env.ARTIFACT_DIR }}/package-manifest.json
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euxo pipefail
+          release_name="gaokun3 package RPMs - ${KERNEL_TAG}"
+          if [[ "${BUILD_EL2}" == "true" ]]; then
+            release_name="${release_name} + EL2"
+          fi
+          # 先创建不带资产的 release，绕开新建 release 期间发并发上传导致的 "Error saving asset"
+          gh release create "$PACKAGE_RELEASE_TAG" \
+            --repo "${GITHUB_REPOSITORY}" \
+            --target "${GITHUB_SHA}" \
+            --title "$release_name" \
+            --notes-file "${ARTIFACT_DIR}/package-release-body.md" \
+            --latest=false
+          # 逐个顺序上传资产，避免并发保存竞态
+          for f in "${ARTIFACT_DIR}"/*.rpm "${ARTIFACT_DIR}/package-manifest.json"; do
+            gh release upload "$PACKAGE_RELEASE_TAG" "$f" \
+              --repo "${GITHUB_REPOSITORY}" \
+              --clobber
+          done
