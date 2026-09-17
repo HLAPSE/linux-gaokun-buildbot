@@ -299,35 +299,9 @@ jobs:
           path: ${{ env.ARTIFACT_DIR }}/${{ steps.package.outputs.package_glob }}
 
       - name: Create GitHub Release
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: |
-          set -euxo pipefail
-          # 先建空 release，再并发上传分卷（"Error saving asset" 竞态只出现在新建 release 期间）
-          gh release create "${{ steps.package.outputs.tag_name }}" \
-            --repo "${GITHUB_REPOSITORY}" \
-            --target "${GITHUB_SHA}" \
-            --title "Fedora ${{ env.FEDORA_RELEASE }} - gaokun3 - ${{ steps.package.outputs.kernel_release }}" \
-            --notes-file "${ARTIFACT_DIR}/release-body.md" \
-            --latest=false
-          # 镜像分卷单卷可达 1.9G：单文件限时 60 分钟防挂死；上传端点偶发 HTTP 500，
-          # --clobber 幂等，失败自动重试 3 次
-          pids=()
-          for f in "${ARTIFACT_DIR}"/${{ steps.package.outputs.package_glob }}; do
-            (
-              for attempt in 1 2 3; do
-                if timeout 3600 gh release upload "${{ steps.package.outputs.tag_name }}" "$f" \
-                  --repo "${GITHUB_REPOSITORY}" \
-                  --clobber; then
-                  exit 0
-                fi
-                echo "upload of $(basename "$f") failed on attempt $attempt/3" >&2
-                sleep $((attempt * 15))
-              done
-              exit 1
-            ) &
-            pids+=($!)
-          done
-          rc=0
-          for p in "${pids[@]}"; do wait "$p" || rc=1; done
-          [[ $rc -eq 0 ]] || { echo "some release assets failed to upload" >&2; exit 1; }
+        uses: softprops/action-gh-release@v2.6.1
+        with:
+          tag_name: ${{ steps.package.outputs.tag_name }}
+          name: Fedora ${{ env.FEDORA_RELEASE }} - gaokun3 - ${{ steps.package.outputs.kernel_release }}
+          body_path: ${{ env.ARTIFACT_DIR }}/release-body.md
+          files: ${{ env.ARTIFACT_DIR }}/${{ steps.package.outputs.package_glob }}
