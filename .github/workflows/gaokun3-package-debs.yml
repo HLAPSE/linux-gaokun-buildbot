@@ -73,6 +73,9 @@ jobs:
           tar -xJf build-packages/linux.tar.xz -C build-packages/mainline-linux --strip-components=1
           cd build-packages/mainline-linux
           git init -q
+          # 一次性仓库：禁用 gc。gc --auto 检测到大量松散对象后会在后台 repack/prune，
+          # 与后续脚本对源码树的快照拷贝竞态（对象被中途删除导致 ENOENT）
+          git config gc.auto 0
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
           git add .
