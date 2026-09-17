@@ -53,7 +53,7 @@ jobs:
       DESKTOP_ENVIRONMENT: ${{ github.event.inputs.desktop_environment }}
       EXTRA_PACKAGES: ${{ github.event.inputs.extra_packages }}
       BUILD_EL2: ${{ github.event.inputs.build_el2 }}
-      IMAGE_SIZE: 12G
+      IMAGE_SIZE: 12G # 兜底值；实际由 "Compute image size" 步骤按 rootfs 用量动态覆盖
       IMAGE_CHUNK_SIZE: 1900M
       GAOKUN_DIR: ${{ github.workspace }}
       WORKDIR: ${{ github.workspace }}/build-ubuntu
@@ -71,7 +71,7 @@ jobs:
           set -euxo pipefail
           sudo apt-get update
           sudo apt-get install -y \
-            rsync kmod curl jq \
+            rsync kmod curl jq gnupg \
             parted dosfstools e2fsprogs zstd xz-utils python3
 
       - name: Prepare build workspace
@@ -218,6 +218,23 @@ jobs:
           sudo mv "$ROOTFS_DIR/etc/resolv.conf" "$ROOTFS_DIR/etc/resolv.conf.bak"
           sudo cp /run/systemd/resolve/resolv.conf "$ROOTFS_DIR/etc/resolv.conf"
 
+          # mozilla apt 仓库（Firefox deb）：密钥与 sources 在 host 侧预先写入 rootfs，
+          # chroot 内只需一次 apt-get update 即可同时解析 Ubuntu 官方与 mozilla 仓库
+          curl -fsSL https://packages.mozilla.org/apt/repo-signing-key.gpg | \
+            gpg --dearmor -o "$WORKDIR/packages.mozilla.org.gpg"
+          sudo install -Dm644 "$WORKDIR/packages.mozilla.org.gpg" \
+            "$ROOTFS_DIR/etc/apt/keyrings/packages.mozilla.org.gpg"
+
+          printf "%s\n" \
+            "deb [signed-by=/etc/apt/keyrings/packages.mozilla.org.gpg] https://packages.mozilla.org/apt mozilla main" \
+            | sudo tee "$ROOTFS_DIR/etc/apt/sources.list.d/mozilla.list" >/dev/null
+
+          printf "%s\n" \
+            "Package: *" \
+            "Pin: origin packages.mozilla.org" \
+            "Pin-Priority: 1000" \
+            | sudo tee "$ROOTFS_DIR/etc/apt/preferences.d/mozilla" >/dev/null
+
           sudo mount --bind /dev "$ROOTFS_DIR/dev"
           sudo mount --bind /dev/pts "$ROOTFS_DIR/dev/pts"
           sudo mount -t proc proc "$ROOTFS_DIR/proc"
@@ -248,22 +265,6 @@ jobs:
 
             # dconf-cli: required by the image configuration step (dconf update writes screen-keyboard defaults)
             apt-get install -y dconf-cli
-
-            install -d -m 0755 /etc/apt/keyrings
-            wget -qO- https://packages.mozilla.org/apt/repo-signing-key.gpg | \
-              gpg --dearmor -o /etc/apt/keyrings/packages.mozilla.org.gpg
-
-            printf "%s\n" \
-              "deb [signed-by=/etc/apt/keyrings/packages.mozilla.org.gpg] https://packages.mozilla.org/apt mozilla main" \
-              > /etc/apt/sources.list.d/mozilla.list
-
-            printf "%s\n" \
-              "Package: *" \
-              "Pin: origin packages.mozilla.org" \
-              "Pin-Priority: 1000" \
-              > /etc/apt/preferences.d/mozilla
-
-            apt-get update
 
             apt-get install -y \
               '"$DESKTOP_ENVIRONMENT"' \
@@ -356,6 +357,20 @@ jobs:
           }
           clean_rootfs
           sudo du -sh "$ROOTFS_DIR"
+
+      - name: Compute image size from rootfs usage
+        run: |
+          set -euxo pipefail
+          used_kib="$(sudo du -sk "$ROOTFS_DIR" | cut -f1)"
+          # rootfs 分区需求 = 实际用量 + 10% ext4 元数据开销 + 2GiB 余量：
+          # chroot 阶段 update-initramfs / kernel-install 还会写入数百 MiB，
+          # 设备首启后 growroot 自动扩容到目标磁盘，无需预留过大空间
+          rootfs_kib=$(( used_kib + used_kib / 10 + 2 * 1024 * 1024 ))
+          total_kib=$(( 1025 * 1024 + rootfs_kib ))
+          size_gib=$(( (total_kib + 1048575) / 1048576 ))
+          if (( size_gib < 8 )); then size_gib=8; fi
+          echo "rootfs usage: $(( used_kib / 1024 ))MiB -> image size: ${size_gib}G"
+          echo "IMAGE_SIZE=${size_gib}G" >> "$GITHUB_ENV"
 
       - name: Create disk image and configure boot
         run: |

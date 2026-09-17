@@ -58,7 +58,7 @@ jobs:
       EXCLUDED_PACKAGES: ${{ github.event.inputs.excluded_packages }}
       EXTRA_PACKAGES: ${{ github.event.inputs.extra_packages }}
       BUILD_EL2: ${{ github.event.inputs.build_el2 }}
-      IMAGE_SIZE: 12G
+      IMAGE_SIZE: 12G # 兜底值；实际由 "Compute image size" 步骤按 rootfs 用量动态覆盖
       IMAGE_CHUNK_SIZE: 1900M
       GAOKUN_DIR: ${{ github.workspace }}
       WORKDIR: ${{ github.workspace }}/build-fedora
@@ -298,6 +298,20 @@ jobs:
             "$ROOTFS_DIR/var/tmp" \
             "$ROOTFS_DIR/tmp"
           sudo du -sh "$ROOTFS_DIR"
+
+      - name: Compute image size from rootfs usage
+        run: |
+          set -euxo pipefail
+          used_kib="$(sudo du -sk "$ROOTFS_DIR" | cut -f1)"
+          # rootfs 分区需求 = 实际用量 + 15% btrfs 元数据开销 + 2GiB 余量：
+          # chroot 阶段 dracut / kernel-install 还会写入数百 MiB，
+          # 设备首启后 growroot 自动扩容到目标磁盘，无需预留过大空间
+          rootfs_kib=$(( used_kib + used_kib * 15 / 100 + 2 * 1024 * 1024 ))
+          total_kib=$(( 1025 * 1024 + rootfs_kib ))
+          size_gib=$(( (total_kib + 1048575) / 1048576 ))
+          if (( size_gib < 8 )); then size_gib=8; fi
+          echo "rootfs usage: $(( used_kib / 1024 ))MiB -> image size: ${size_gib}G"
+          echo "IMAGE_SIZE=${size_gib}G" >> "$GITHUB_ENV"
 
       - name: Create disk image and configure boot
         run: |
