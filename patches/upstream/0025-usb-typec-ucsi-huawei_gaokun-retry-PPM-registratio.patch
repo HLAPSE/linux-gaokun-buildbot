@@ -1,0 +1,149 @@
+From cfb1a3ecfdec3937b0764aad7717055c5d4e2b28 Mon Sep 17 00:00:00 2001
+From: a <a@b.c>
+Date: Thu, 17 Sep 2026 00:07:36 +0800
+Subject: [PATCH] usb: typec: ucsi: huawei_gaokun: retry PPM registration on
+ cold boot
+
+On the Huawei MateBook E Go the EC's UCSI PPM is not fully responsive
+during early boot: it answers the EC mailbox and even lets the UCSI core
+reset/get capabilities, but connector setup can still fail with a command
+timeout ("con1: failed to register alt modes", -ETIMEDOUT) around 15s
+after boot, while the EC keeps delivering UCSI/USB events afterwards.
+ucsi_register() only queues the asynchronous PPM initialization, which
+the UCSI core aborts permanently on every error other than
+-EPROBE_DEFER, leaving Type-C unusable until a manual driver unbind/bind.
+
+Recover in the glue driver registration worker:
+
+ - run on system_long_wq as waiting for PPM initialization may block;
+ - after ucsi_register(), flush the core init work and check
+   ucsi->connector to detect the asynchronous failure;
+ - on failure unregister the partial UCSI instance and re-run the whole
+   registration after 5s, up to 10 attempts;
+ - track notifier/UCSI registration state so remove() only tears down
+   what was registered.
+
+The initial 3s deferral is kept: earlier UCSI traffic interferes with the
+internal display bring-up and results in a dark panel.
+---
+ drivers/usb/typec/ucsi/ucsi_huawei_gaokun.c | 65 +++++++++++++++++----
+ 1 file changed, 53 insertions(+), 12 deletions(-)
+
+diff --git a/drivers/usb/typec/ucsi/ucsi_huawei_gaokun.c b/drivers/usb/typec/ucsi/ucsi_huawei_gaokun.c
+index ca1b534..234979f 100644
+--- a/drivers/usb/typec/ucsi/ucsi_huawei_gaokun.c
++++ b/drivers/usb/typec/ucsi/ucsi_huawei_gaokun.c
+@@ -19,13 +19,18 @@
+ #include <linux/usb/typec_altmode.h>
+ #include <linux/usb/typec_dp.h>
+ #include <linux/usb/typec_mux.h>
+-#include <linux/workqueue_types.h>
++#include <linux/workqueue.h>
+ 
+ #include "ucsi.h"
+ 
+ #define EC_EVENT_UCSI	0x21
+ #define EC_EVENT_USB	0x22
+ 
++/* EC can't handle UCSI properly in the early stage */
++#define GAOKUN_UCSI_REGISTER_DELAY	(3 * HZ)
++#define GAOKUN_UCSI_RETRY_DELAY		(5 * HZ)
++#define GAOKUN_UCSI_REGISTER_RETRIES	10
++
+ #define GAOKUN_CCX_MASK		GENMASK(1, 0)
+ #define GAOKUN_MUX_MASK		GENMASK(3, 2)
+ 
+@@ -105,6 +110,9 @@ struct gaokun_ucsi {
+ 	struct notifier_block nb;
+ 	u16 version;
+ 	u8 num_ports;
++	u8 register_retries;
++	bool notifier_registered;
++	bool registered;
+ };
+ 
+ /* -------------------------------------------------------------------------- */
+@@ -469,21 +477,52 @@ static int gaokun_ucsi_ports_init(struct gaokun_ucsi *uec)
+ static void gaokun_ucsi_register_worker(struct work_struct *work)
+ {
+ 	struct gaokun_ucsi *uec;
+-	struct ucsi *ucsi;
+ 	int ret;
+ 
+ 	uec = container_of(work, struct gaokun_ucsi, work.work);
+-	ucsi = uec->ucsi;
+ 
+-	ret = gaokun_ec_register_notify(uec->ec, &uec->nb);
++	if (!uec->notifier_registered) {
++		ret = gaokun_ec_register_notify(uec->ec, &uec->nb);
++		if (ret) {
++			dev_err_probe(uec->dev, ret, "notifier register failed\n");
++			goto retry;
++		}
++		uec->notifier_registered = true;
++	}
++
++	ret = ucsi_register(uec->ucsi);
+ 	if (ret) {
+-		dev_err_probe(ucsi->dev, ret, "notifier register failed\n");
++		dev_err_probe(uec->dev, ret, "ucsi register failed\n");
++		goto retry;
++	}
++
++	/*
++	 * ucsi_register() only queues the asynchronous PPM initialization.
++	 * Wait for it to finish and verify that the connectors are up. On a
++	 * cold boot the EC PPM may keep failing UCSI commands (e.g. connector
++	 * alt mode setup times out with -ETIMEDOUT) long after the EC itself
++	 * responds, and the UCSI core gives up on any error other than
++	 * -EPROBE_DEFER. Tear the partial registration down and try the whole
++	 * registration again until the PPM catches up.
++	 */
++	flush_delayed_work(&uec->ucsi->work);
++	if (uec->ucsi->connector) {
++		uec->registered = true;
+ 		return;
+ 	}
+ 
+-	ret = ucsi_register(ucsi);
+-	if (ret)
+-		dev_err_probe(ucsi->dev, ret, "ucsi register failed\n");
++	dev_warn(uec->dev, "PPM init failed, retrying UCSI registration\n");
++	ucsi_unregister(uec->ucsi);
++
++retry:
++	if (++uec->register_retries >= GAOKUN_UCSI_REGISTER_RETRIES) {
++		dev_err(uec->dev, "giving up after %u UCSI registration attempts\n",
++			uec->register_retries);
++		return;
++	}
++
++	queue_delayed_work(system_long_wq, &uec->work,
++			   GAOKUN_UCSI_RETRY_DELAY);
+ }
+ 
+ static int gaokun_ucsi_probe(struct auxiliary_device *adev,
+@@ -516,8 +555,8 @@ static int gaokun_ucsi_probe(struct auxiliary_device *adev,
+ 	ucsi_set_drvdata(uec->ucsi, uec);
+ 	auxiliary_set_drvdata(adev, uec);
+ 
+-	/* EC can't handle UCSI properly in the early stage */
+-	schedule_delayed_work(&uec->work, 3 * HZ);
++	queue_delayed_work(system_long_wq, &uec->work,
++			   GAOKUN_UCSI_REGISTER_DELAY);
+ 
+ 	return 0;
+ }
+@@ -528,8 +567,10 @@ static void gaokun_ucsi_remove(struct auxiliary_device *adev)
+ 	int i;
+ 
+ 	disable_delayed_work_sync(&uec->work);
+-	gaokun_ec_unregister_notify(uec->ec, &uec->nb);
+-	ucsi_unregister(uec->ucsi);
++	if (uec->notifier_registered)
++		gaokun_ec_unregister_notify(uec->ec, &uec->nb);
++	if (uec->registered)
++		ucsi_unregister(uec->ucsi);
+ 	for (i = 0; i < uec->num_ports; ++i)
+ 		typec_mux_put(uec->ports[i].typec_mux);
+ 
