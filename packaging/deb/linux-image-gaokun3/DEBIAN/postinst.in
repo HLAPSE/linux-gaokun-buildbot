@@ -18,4 +18,20 @@ for name in install.conf cmdline devicetree; do
 done
 printf 'layout=bls\n' > /etc/kernel/install.conf
 printf 'qcom/@DTB_NAME@\n' > /etc/kernel/devicetree
-update-initramfs -c -k @KREL@ 2>/dev/null || true
+
+# 失败必须显式暴露：静默生成残缺 initrd 会让 dpkg 显示成功、重启才进不了系统
+if ! update-initramfs -c -k @KREL@; then
+  echo "ERROR: failed to generate initramfs for @KREL@" >&2
+  exit 1
+fi
+
+# 注册/刷新 systemd-boot 的 BLS 条目（复用上方临时 devicetree 与镜像预置的 /etc/kernel/cmdline）。
+# 仅在 ESP 真实挂载到本机时执行：打包 chroot 里 /boot/efi 只是普通目录（未挂载 loop 分区），
+# 此时写入的条目会落进 rootfs 挂载点背后、被 ESP 遮蔽。用 mountpoint 按设备号判定，不看 /proc/mounts，
+# 以免把宿主挂载状态误判进 chroot。镜像内首批条目由 50_make_image_*.sh 在 ESP 挂载后生成。
+if command -v kernel-install >/dev/null 2>&1 &&
+   { mountpoint -q /boot/efi || mountpoint -q /efi; }; then
+  kernel-install --entry-token=machine-id remove @KREL@ || true
+  kernel-install --verbose --make-entry-directory=yes --entry-token=machine-id add \
+    @KREL@ /boot/vmlinuz-@KREL@ /boot/initrd.img-@KREL@
+fi

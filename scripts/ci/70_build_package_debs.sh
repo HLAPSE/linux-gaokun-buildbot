@@ -40,7 +40,12 @@ render_template_to_string() {
     shift 2
   done
 
-  sed "${sed_args[@]}" "$template_path"
+  # 无替换项时不能调用 `sed <文件>`：sed 会把文件路径当成脚本内容解析
+  if [[ ${#sed_args[@]} -eq 0 ]]; then
+    cat "$template_path"
+  else
+    sed "${sed_args[@]}" "$template_path"
+  fi
 }
 
 build_deb() {
@@ -153,12 +158,19 @@ build_kernel_variant() {
       "@DTB_NAME@" "$dtb_name" \
       "@KREL@" "$krel"
   )"
+  local image_postrm
+  image_postrm="$(
+    render_template_to_string \
+      "$GAOKUN_DIR/packaging/deb/linux-image-gaokun3/DEBIAN/postrm.in" \
+      "@KREL@" "$krel"
+  )"
 
   build_deb "$GAOKUN_DIR/packaging/deb/linux-image-gaokun3" \
     "$image_pkg" "$image_stage" "$deb_version" \
     "$image_description" \
     "linux-firmware-gaokun3" "$DEB_ARCH" \
-    "$postinst_script"
+    "$postinst_script" \
+    "$image_postrm"
 
   local modules_postinst
   modules_postinst="$(
