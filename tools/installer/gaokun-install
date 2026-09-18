@@ -47,11 +47,24 @@ case ${#targets[@]} in
 esac
 
 # ---------------- 汇总与确认 ----------------
-src_size=$(blockdev --getsize64 "$src_disk")
 tgt_size=$(blockdev --getsize64 "$tgt_disk")
-(( src_size <= tgt_size )) || die "目标盘 $(lsblk -dn -o SIZE "$tgt_disk") 小于源 U 盘 $(lsblk -dn -o SIZE "$src_disk")"
 
-say "源盘 (U 盘): $(lsblk -dn -o MODEL,SIZE "$src_disk" | tr -s ' ')"
+# 镜像数据只到最后一个分区末尾，U 盘本身常远大于镜像（如镜像 12G 写入 128G U 盘）。
+# 按整盘 dd 会白拷十几倍数据，且目标盘比 U 盘小（但仍远大于镜像）时会被误拒。
+# 有效镜像末尾 = 各分区 START+SIZE 的最大值，再加 1MiB 余量。
+image_end=0
+while read -r start size; do
+    [[ "$start" =~ ^[0-9]+$ && "$size" =~ ^[0-9]+$ ]] || continue
+    end=$((start + size))
+    (( end > image_end )) && image_end=$end
+done < <(lsblk -nlb -o START,SIZE "$src_disk")
+(( image_end > 0 )) || die "无法解析 $src_disk 的分区边界"
+image_end=$((image_end + 1048576))
+copy_mib=$(( (image_end + 1048575) / 1048576 ))
+
+(( image_end <= tgt_size )) || die "目标盘 $(lsblk -dn -o SIZE "$tgt_disk") 小于镜像有效数据 $((image_end/1024/1024))MiB"
+
+say "源盘 (U 盘): $(lsblk -dn -o MODEL,SIZE "$src_disk" | tr -s ' ') (仅拷贝前 ${copy_mib}MiB 镜像数据)"
 say "目标 (内置盘): $(lsblk -dn -o MODEL,SIZE "$tgt_disk" | tr -s ' ')"
 echo
 echo "  目标盘上的所有数据(含 Windows/恢复分区)将被永久清除, 且无法恢复!"
@@ -60,9 +73,9 @@ echo
 read -rp "确认继续请输入 YES: " ans
 [[ "$ans" == "YES" ]] || die "已取消"
 
-# ---------------- 整盘克隆 ----------------
-say "开始整盘克隆 $(lsblk -dn -o SIZE "$src_disk"), 请耐心等待..."
-dd if="$src_disk" of="$tgt_disk" bs=4M status=progress conv=fsync
+# ---------------- 整盘克隆（截断到镜像数据末尾） ----------------
+say "开始克隆镜像前 ${copy_mib}MiB, 请耐心等待..."
+dd if="$src_disk" of="$tgt_disk" bs=1M count="$copy_mib" status=progress conv=fsync
 sync
 
 # ---------------- 分区与文件系统扩容(离线) ----------------
@@ -104,7 +117,7 @@ echo
 echo "  下一步:"
 echo "  1. 关机后拔掉 U 盘(两盘 UUID 完全相同, 不拔可能从 U 盘启动/挂错分区)"
 echo "  2. 按电源键开机, 直接进入内置硬盘上的系统"
-echo "  3. 首次进入后建议: 改密码 / 关自动登录 / 跑一遍 gaokun-check"
+echo "  3. 若 U 盘上尚未改过密码, 首次登录会被强制要求修改; 进系统后跑一遍 gaokun-check"
 echo
 read -rp "按回车键关机(Ctrl+C 留在 Live 环境): "
 poweroff
