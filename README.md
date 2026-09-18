@@ -44,6 +44,7 @@ The package pipeline builds and installs dedicated package sets:
 - `others/0003`: adapted from [chiyuki0325/EGoTouchRev-Linux](https://github.com/chiyuki0325/EGoTouchRev-Linux) to add the Himax HX83121A SPI touchscreen driver
 - `others/0004`: local change in this repository to fix DPU video timing width truncation when DSC is enabled
 - `others/0005`: adapted from [right-0903/linux-gaokun](https://github.com/right-0903/linux-gaokun) to add backlight regulator supply for the HX83121A panel driver
+- `others/0007`: local change in this repository; on cold boot the EC UCSI PPM may stay half-responsive for a long time, so registration is retried 10 times at 5s and then backed off to 30s/60s for a ~30 minute window, preventing Type-C from being permanently unusable for the boot session
 - `media/*`: adapted from the [jhovold/linux](https://github.com/jhovold/linux/commits/wip/sc8280xp-6.16) to add SC8280XP Venus support
 - `0099`: local patch in this repository to import the current DTS files and `gaokun3_defconfig`
 - **[Optional]** `el2/*`: adapted from [TravMurav/linux](https://github.com/TravMurav/linux/tree/x13s-6.18-v1.1-cxsd) for the EL2 boot path, including SMP2P handover, remoteproc attach/restart flow, SCM/SHM owner handling, and related rpmsg/QRTR/pmic_glink stability fixes

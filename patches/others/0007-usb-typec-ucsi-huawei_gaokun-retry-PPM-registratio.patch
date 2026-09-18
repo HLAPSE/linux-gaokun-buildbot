@@ -1,8 +1,11 @@
 From cfb1a3ecfdec3937b0764aad7717055c5d4e2b28 Mon Sep 17 00:00:00 2001
-From: a <a@b.c>
+From: gaokun3 maintainer <gaokun3@localhost>
 Date: Thu, 17 Sep 2026 00:07:36 +0800
 Subject: [PATCH] usb: typec: ucsi: huawei_gaokun: retry PPM registration on
  cold boot
+
+Downstream-only patch carried by the gaokun3 images; not submitted
+upstream yet.
 
 On the Huawei MateBook E Go the EC's UCSI PPM is not fully responsive
 during early boot: it answers the EC mailbox and even lets the UCSI core
@@ -19,21 +22,23 @@ Recover in the glue driver registration worker:
  - after ucsi_register(), flush the core init work and check
    ucsi->connector to detect the asynchronous failure;
  - on failure unregister the partial UCSI instance and re-run the whole
-   registration after 5s, up to 10 attempts;
+   registration: 5s for the first 10 attempts, then back off to 30s and
+   60s for a total retry window of about 30 minutes, instead of giving
+   up permanently after ~50s;
  - track notifier/UCSI registration state so remove() only tears down
    what was registered.
 
 The initial 3s deferral is kept: earlier UCSI traffic interferes with the
 internal display bring-up and results in a dark panel.
 ---
- drivers/usb/typec/ucsi/ucsi_huawei_gaokun.c | 65 +++++++++++++++++----
- 1 file changed, 53 insertions(+), 12 deletions(-)
+ drivers/usb/typec/ucsi/ucsi_huawei_gaokun.c | 67 ++++++++++++++++++++--
+ 1 file changed, 67 insertions(+), 12 deletions(-)
 
 diff --git a/drivers/usb/typec/ucsi/ucsi_huawei_gaokun.c b/drivers/usb/typec/ucsi/ucsi_huawei_gaokun.c
 index ca1b534..234979f 100644
 --- a/drivers/usb/typec/ucsi/ucsi_huawei_gaokun.c
 +++ b/drivers/usb/typec/ucsi/ucsi_huawei_gaokun.c
-@@ -19,13 +19,18 @@
+@@ -19,13 +19,32 @@
  #include <linux/usb/typec_altmode.h>
  #include <linux/usb/typec_dp.h>
  #include <linux/usb/typec_mux.h>
@@ -45,15 +50,29 @@ index ca1b534..234979f 100644
  #define EC_EVENT_UCSI	0x21
  #define EC_EVENT_USB	0x22
  
-+/* EC can't handle UCSI properly in the early stage */
++/*
++ * EC can't handle UCSI properly in the early stage. On cold boot the PPM
++ * may stay half-responsive for tens of seconds: retry fast, then back off.
++ */
 +#define GAOKUN_UCSI_REGISTER_DELAY	(3 * HZ)
-+#define GAOKUN_UCSI_RETRY_DELAY		(5 * HZ)
-+#define GAOKUN_UCSI_REGISTER_RETRIES	10
++#define GAOKUN_UCSI_RETRY_FAST		10	/* attempts at 5s */
++#define GAOKUN_UCSI_RETRY_SLOW		20	/* then 30s */
++#define GAOKUN_UCSI_RETRY_MAX		45	/* then 60s, ~30min window */
++
++static unsigned long gaokun_ucsi_retry_delay(u8 attempt)
++{
++	if (attempt < GAOKUN_UCSI_RETRY_FAST)
++		return 5 * HZ;
++	if (attempt < GAOKUN_UCSI_RETRY_SLOW)
++		return 30 * HZ;
++
++	return 60 * HZ;
++}
 +
  #define GAOKUN_CCX_MASK		GENMASK(1, 0)
  #define GAOKUN_MUX_MASK		GENMASK(3, 2)
  
-@@ -105,6 +110,9 @@ struct gaokun_ucsi {
+@@ -105,6 +124,9 @@ struct gaokun_ucsi {
  	struct notifier_block nb;
  	u16 version;
  	u8 num_ports;
@@ -63,7 +82,7 @@ index ca1b534..234979f 100644
  };
  
  /* -------------------------------------------------------------------------- */
-@@ -469,21 +477,52 @@ static int gaokun_ucsi_ports_init(struct gaokun_ucsi *uec)
+@@ -469,21 +491,53 @@ static int gaokun_ucsi_ports_init(struct gaokun_ucsi *uec)
  static void gaokun_ucsi_register_worker(struct work_struct *work)
  {
  	struct gaokun_ucsi *uec;
@@ -112,18 +131,19 @@ index ca1b534..234979f 100644
 +	ucsi_unregister(uec->ucsi);
 +
 +retry:
-+	if (++uec->register_retries >= GAOKUN_UCSI_REGISTER_RETRIES) {
-+		dev_err(uec->dev, "giving up after %u UCSI registration attempts\n",
++	if (++uec->register_retries >= GAOKUN_UCSI_RETRY_MAX) {
++		dev_err(uec->dev,
++			"giving up after %u UCSI registration attempts\n",
 +			uec->register_retries);
 +		return;
 +	}
 +
 +	queue_delayed_work(system_long_wq, &uec->work,
-+			   GAOKUN_UCSI_RETRY_DELAY);
++			   gaokun_ucsi_retry_delay(uec->register_retries));
  }
  
  static int gaokun_ucsi_probe(struct auxiliary_device *adev,
-@@ -516,8 +555,8 @@ static int gaokun_ucsi_probe(struct auxiliary_device *adev,
+@@ -516,8 +570,8 @@ static int gaokun_ucsi_probe(struct auxiliary_device *adev,
  	ucsi_set_drvdata(uec->ucsi, uec);
  	auxiliary_set_drvdata(adev, uec);
  
@@ -134,7 +154,7 @@ index ca1b534..234979f 100644
  
  	return 0;
  }
-@@ -528,8 +567,10 @@ static void gaokun_ucsi_remove(struct auxiliary_device *adev)
+@@ -528,8 +582,10 @@ static void gaokun_ucsi_remove(struct auxiliary_device *adev)
  	int i;
  
  	disable_delayed_work_sync(&uec->work);
