@@ -31,9 +31,12 @@ on:
 permissions:
   contents: write
 
-# 同一分支/标签上的重跑只排队不互相取消：内核/包构建是长任务
+# 同一分支/标签上的重跑只排队不互相取消：内核/包构建是长任务。
+# 组名用固定字面量而非 github.workflow：本工作流可被 ubuntu-gaokun3-release
+# 通过 workflow_call 调用，此时 github.workflow 是调用方的名字（曾因此与顶层
+# 工作流撞组，触发 concurrency deadlock 被取消）
 concurrency:
-  group: ${{ github.workflow }}-${{ github.ref }}
+  group: gaokun3-package-debs-${{ github.ref }}
   cancel-in-progress: false
 
 jobs:

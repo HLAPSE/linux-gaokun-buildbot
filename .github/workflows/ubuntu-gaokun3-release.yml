@@ -33,9 +33,13 @@ on:
 permissions:
   contents: write
 
-# 同一分支/标签上的重跑只排队不互相取消：镜像构建是长任务，中途取消会浪费已完成的作业
+# 同一分支/标签上的重跑只排队不互相取消：镜像构建是长任务，中途取消会浪费已完成的作业。
+# 组名必须用固定字面量而非 github.workflow：本工作流会通过 workflow_call 调用
+# gaokun3-package-debs，而可复用工作流里 github.workflow 继承的是调用方名字，
+# 两边用 github.workflow 会解析出同一组名，触发 "deadlock between a top level
+# workflow and build-package-debs" 死锁取消
 concurrency:
-  group: ${{ github.workflow }}-${{ github.ref }}
+  group: ubuntu-gaokun3-release-${{ github.ref }}
   cancel-in-progress: false
 
 jobs:
