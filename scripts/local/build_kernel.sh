@@ -80,12 +80,14 @@ ensure_source_tree() {
         git clone https://github.com/KawaiiHachimi/linux-gaokun-buildbot "$GAOKUN_DIR"
     fi
 
-    read -r -p "Use Chinese mirror (mirrors.bfsu.edu.cn) for Linux kernel? [Y/n] [default: Y]: " mirror_choice
+    # vX.Y.Z 是 stable 标签，只存在于 stable 树；torvalds 主线树只有 vX.Y 正式版标签，
+    # 从该树 clone -b v7.2.5 会直接报找不到标签
+    read -r -p "Use Chinese mirror (mirrors.bfsu.edu.cn) for Linux stable kernel? [Y/n] [default: Y]: " mirror_choice
     mirror_choice="${mirror_choice:-Y}"
     if [[ "$mirror_choice" =~ ^([nN][oO]|[nN])$ ]]; then
-        KERNEL_URL="https://git.kernel.org/pub/scm/linux/kernel/git/torvalds/linux.git"
+        KERNEL_URL="https://git.kernel.org/pub/scm/linux/kernel/git/stable/linux.git"
     else
-        KERNEL_URL="https://mirrors.bfsu.edu.cn/git/linux.git"
+        KERNEL_URL="https://mirrors.bfsu.edu.cn/git/linux-stable.git"
     fi
 
     rm -rf "$KERN_SRC"
