@@ -7,7 +7,7 @@ Subject: [PATCH] arm64: gaokun3: import local dts and defconfig
  .../qcom/sc8280xp-huawei-gaokun3-camera.dtsi  | 307 +++++++++++
  .../boot/dts/qcom/sc8280xp-huawei-gaokun3.dts | 442 ++++++++++++----
  arch/arm64/configs/gaokun3_defconfig          | 490 ++++++++++++++++++
- 3 files changed, 1138 insertions(+), 101 deletions(-)
+ 3 files changed, 1140 insertions(+), 101 deletions(-)
  create mode 100644 arch/arm64/boot/dts/qcom/sc8280xp-huawei-gaokun3-camera.dtsi
  create mode 100644 arch/arm64/configs/gaokun3_defconfig
 
@@ -1102,7 +1102,7 @@ new file mode 100644
 index 000000000..f95adc9bf
 --- /dev/null
 +++ b/arch/arm64/configs/gaokun3_defconfig
-@@ -0,0 +1,490 @@
+@@ -0,0 +1,492 @@
 +CONFIG_LOCALVERSION="-gaokun3"
 +# CONFIG_LOCALVERSION_AUTO is not set
 +CONFIG_SYSVIPC=y
@@ -1286,6 +1286,7 @@ index 000000000..f95adc9bf
 +CONFIG_QCOM_QSEECOM_UEFISECAPP=y
 +CONFIG_OF_OVERLAY=y
 +CONFIG_ZRAM=m
++CONFIG_ZRAM_BACKEND_ZSTD=y
 +CONFIG_BLK_DEV_LOOP=y
 +CONFIG_BLK_DEV_NBD=m
 +CONFIG_BLK_DEV_NVME=y
@@ -1416,6 +1417,7 @@ index 000000000..f95adc9bf
 +CONFIG_FRAMEBUFFER_CONSOLE_ROTATION=y
 +CONFIG_SOUND=m
 +CONFIG_SND=m
++CONFIG_SND_SEQUENCER=m
 +# CONFIG_SND_DRIVERS is not set
 +# CONFIG_SND_PCI is not set
 +# CONFIG_SND_SPI is not set
