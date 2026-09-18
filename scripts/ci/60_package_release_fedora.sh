@@ -36,9 +36,10 @@ EOF
 "
 fi
 
-# 压缩级别可调：-19 极慢，-15 压缩率基本持平、速度快约一倍
+# 压缩级别默认 -15（-19 极慢，-15 压缩率基本持平、速度快约一倍）；workflow 也显式传 15，
+# 本地直跑脚本与 CI 行为一致，可用环境变量 ZSTD_LEVEL 覆盖
 # 原始 img 不随发布上传（只上传 .zst / 分卷），直接从 IMAGE_FILE 压缩，省一次整盘拷贝
-ZSTD_LEVEL="${ZSTD_LEVEL:-19}"
+ZSTD_LEVEL="${ZSTD_LEVEL:-15}"
 zstd -T0 "-${ZSTD_LEVEL}" "$IMAGE_FILE" -o "$ZST_FILE"
 
 # 公共发布说明先写一份，超过 2GB 再追加分卷重组说明
