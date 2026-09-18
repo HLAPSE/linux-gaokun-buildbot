@@ -149,6 +149,12 @@ EOF
 install -d /etc/kernel/install.d
 ln -sf /dev/null /etc/kernel/install.d/51-dracut-rescue.install
 
+# 参数分组（bring-up 历史遗留，无硬件逐项验证前不擅自摘除，与 Ubuntu 镜像保持一致；
+# clk_ignore_unused/pd_ignore_unused/usbcore.autosuspend=-1 是续航相关参数，
+# 稳定后可逐项摘除实验，摘掉 autosuspend 需重点验证华为 EC(0x12d1:0x10b8) 唤醒后是否失灵）：
+#   arm64.nopauth 关指针认证; iommu.passthrough=0 + strict=0 lazy DMA 映射;
+#   pcie_aspm 链路省电; efi=noruntime 禁用不稳定的 UEFI RT; fbcon=rotate:1 竖屏 TTY;
+#   usbhid.quirks 0x20000000 = NO_INIT_REPORTS; 其余为控制台/日志设置
 cat > /etc/kernel/cmdline <<EOF
 root=UUID=$ROOT_UUID rootflags=subvol=@ clk_ignore_unused pd_ignore_unused arm64.nopauth iommu.passthrough=0 iommu.strict=0 pcie_aspm.policy=powersupersave efi=noruntime fbcon=rotate:1 usbcore.autosuspend=-1 usbhid.quirks=0x12d1:0x10b8:0x20000000 consoleblank=0 loglevel=4 psi=1
 EOF

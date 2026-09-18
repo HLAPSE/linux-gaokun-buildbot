@@ -70,6 +70,9 @@ sudo chroot "$MNT" /usr/bin/env KREL="$KREL" KREL_EL2="$KREL_EL2" BUILD_EL2="$BU
 echo "ubuntu" > /etc/hostname
 id -u user >/dev/null 2>&1 || useradd -m -s /bin/bash -G sudo user
 echo "user:user" | chpasswd
+# 镜像公开发布、默认口令 user/user 是公开信息：强制首次登录（GDM/SSH 均走 PAM）修改，
+# 消除 Live U 盘启动即带公开弱口令 + NOPASSWD sudo 的风险
+chage -d 0 user
 mkdir -p /etc/sudoers.d
 echo "%sudo ALL=(ALL) NOPASSWD:ALL" > /etc/sudoers.d/sudo-nopasswd
 chmod 440 /etc/sudoers.d/sudo-nopasswd
@@ -188,29 +191,32 @@ ath11k_pci
 i2c-hid-of
 MODEOF
 
-mkdir -p /etc/initramfs-tools/hooks
-cat > /etc/initramfs-tools/hooks/gaokun3-firmware <<'EOF'
-#!/bin/sh
-set -e
-
-. /usr/share/initramfs-tools/hook-functions
-
-copy_fw() {
-    copy_file firmware "$1" || [ "$?" -eq 1 ]
-}
-
-copy_fw /lib/firmware/qcom/sc8280xp/HUAWEI/gaokun3/qcadsp8280.mbn
-copy_fw /lib/firmware/qcom/sc8280xp/HUAWEI/gaokun3/qccdsp8280.mbn
-copy_fw /lib/firmware/qcom/sc8280xp/HUAWEI/gaokun3/qcslpi8280.mbn
-copy_fw /lib/firmware/qcom/sc8280xp/HUAWEI/gaokun3/audioreach-tplg.bin
-EOF
-chmod 0755 /etc/initramfs-tools/hooks/gaokun3-firmware
+# initramfs 固件拷贝 hook 由 linux-firmware-gaokun3 DEB 打包安装
+# （packaging/deb/linux-firmware-gaokun3/hooks/initramfs-hook.in），
+# 这里不再重复落盘，避免两份内容日后漂移互相覆盖
 
 install -d /etc/kernel
 cat > /etc/kernel/install.conf <<'EOF'
 layout=bls
 EOF
 
+# 参数分组（bring-up 历史遗留，无硬件逐项验证前不擅自摘除）：
+#   root=UUID                              根分区
+#   clk_ignore_unused pd_ignore_unused     【续航相关, 稳定后优先摘除实验】
+#                                          禁止关未被消费者持有的时钟/电源域，SC8280XP 早期
+#                                          DTS 资源不完整时防外设挂死；代价是静态功耗增加
+#   arm64.nopauth                          关闭指针认证（早期固件/兼容性 workaround）
+#   iommu.passthrough=0 iommu.strict=0     启用 DMA 映射但用 lazy 模式（性能/安全折中）
+#   pcie_aspm.policy=powersupersave        NVMe/WiFi 链路省电
+#   modprobe.blacklist=simpledrm           避免 simpledrm 与 msm/msmgfx 争显
+#   efi=noruntime                          UEFI Runtime Services 不稳定，禁用
+#   fbcon=rotate:1                         竖屏 TTY
+#   usbcore.autosuspend=-1                 【续航相关, 稳定后优先摘除实验】
+#                                          全局关闭 USB 自动休眠；0x12d1:0x10b8(华为 EC/HID)
+#                                          行为不标准(另需 NO_INIT_REPORTS quirk)，其 resume
+#                                          路径同样可疑，摘掉可能导致 USB 唤醒后失灵
+#   usbhid.quirks=...:0x20000000           HID_QUIRK_NO_INIT_REPORTS，华为 EC 启动不报点
+#   consoleblank=0 loglevel=4 psi=1        控制台/日志/PSI
 cat > /etc/kernel/cmdline <<EOF
 root=UUID=$ROOT_UUID clk_ignore_unused pd_ignore_unused arm64.nopauth iommu.passthrough=0 iommu.strict=0 pcie_aspm.policy=powersupersave modprobe.blacklist=simpledrm efi=noruntime fbcon=rotate:1 usbcore.autosuspend=-1 usbhid.quirks=0x12d1:0x10b8:0x20000000 consoleblank=0 loglevel=4 psi=1
 EOF
@@ -238,10 +244,16 @@ bootctl --no-variables --esp-path=/boot/efi install
 install_kernel_variant "$KREL" "sc8280xp-huawei-gaokun3.dtb"
 if [[ "$BUILD_EL2" == "true" && -n "$KREL_EL2" ]]; then
   install_kernel_variant "$KREL_EL2" "sc8280xp-huawei-gaokun3-el2.dtb"
+  # 上面的 el2 安装会把 /etc/kernel/devicetree 留在 el2 值上，恢复为 standard：
+  # 默认启动项是 standard，设备上手工 kernel-install 也应默认用 standard DTB；
+  # el2 包 postinst 安装时会临时写入 el2 DTB 并自行恢复，不依赖该持久值
+  printf 'qcom/sc8280xp-huawei-gaokun3.dtb\n' > /etc/kernel/devicetree
 fi
 
 cat > /boot/efi/loader/loader.conf <<EOF
-default ${MACHINE_ID}-${KREL}.conf
+# 通配所有 standard gaokun3 条目（不含 -gaokun3-el2）：systemd-boot 对多匹配按版本排序，
+# 自动选择最高版本，设备上 dpkg 升级新内核后无需再手工改 default
+default *-gaokun3.conf
 timeout 5
 console-mode keep
 editor no
