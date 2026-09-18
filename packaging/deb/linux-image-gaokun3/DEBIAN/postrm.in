@@ -1,0 +1,6 @@
+# 移除 systemd-boot BLS 条目。同样要求 ESP 真实挂载（见 postinst），
+# 未挂载（打包 chroot）时条目本就不在 ESP 上，跳过即可
+if command -v kernel-install >/dev/null 2>&1 &&
+   { mountpoint -q /boot/efi || mountpoint -q /efi; }; then
+  kernel-install --entry-token=machine-id remove @KREL@ || true
+fi
