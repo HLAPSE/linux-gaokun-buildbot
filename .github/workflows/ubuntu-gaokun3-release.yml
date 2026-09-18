@@ -18,7 +18,9 @@ on:
       extra_packages:
         description: Extra packages to install (space-separated)
         required: true
-        default: "language-pack-gnome-zh-hans ibus-libpinyin gnome-tweaks gnome-shell-extension-manager mpv v4l-utils vim nano ripgrep git htop rsync mutter screen firefox systemd-zram-generator cloud-guest-utils"
+        # mutter 随 gnome-shell 必装无需显式列；rsync 仅构建机需要（host deps 已装）；
+        # git/vim/ripgrep/v4l-utils/screen 属开发调试工具，需要时进系统自行安装
+        default: "language-pack-gnome-zh-hans ibus-libpinyin firefox systemd-zram-generator cloud-guest-utils gnome-tweaks gnome-shell-extension-manager mpv htop nano"
       build_el2:
         description: Build and include optional -gaokun3-el2 kernel and EL2 EFI payloads
         required: true

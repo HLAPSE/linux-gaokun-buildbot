@@ -22,7 +22,11 @@ on:
       extra_packages:
         description: Extra packages to install (space-separated)
         required: true
-        default: "google-noto-sans-cjk-tc-fonts google-noto-sans-cjk-sc-fonts google-noto-sans-cjk-jp-fonts google-noto-sans-cjk-kr-fonts google-noto-serif-cjk-fonts ibus-libpinyin nano mpv ripgrep git htop curl wget NetworkManager-wifi cloud-utils-growroot microcode-fedora ipw2100-firmware* ipw2200-firmware* fedora-release-ostree"
+        # growpart 在 cloud-utils-growpart（无 cloud-utils-growroot 包）；
+        # microcode-fedora 包不存在且 arm64 无需 x86 微码；ipw2x00 是古老 x86 网卡固件；
+        # fedora-release-ostree 包不存在（经典 RPM 镜像）；Noto CJK 各区域版均含全量字形，留 sc 即可；
+        # curl 随 @standard 安装；git/ripgrep 属开发工具按需自装
+        default: "google-noto-sans-cjk-sc-fonts ibus-libpinyin NetworkManager-wifi cloud-utils-growpart nano mpv htop wget"
       build_el2:
         description: Build and include optional -gaokun3-el2 kernel and EL2 EFI payloads
         required: true
