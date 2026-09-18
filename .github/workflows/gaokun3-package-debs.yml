@@ -6,7 +6,7 @@ on:
       kernel_tag:
         description: Linux kernel tag
         required: true
-        default: "v7.2-rc2"
+        default: "v7.2.5"
       build_el2:
         description: Build extra -gaokun3-el2 kernel packages
         required: true
@@ -31,6 +31,14 @@ on:
 permissions:
   contents: write
 
+# 同一分支/标签上的重跑只排队不互相取消：内核/包构建是长任务。
+# 组名用固定字面量而非 github.workflow：本工作流可被 ubuntu-gaokun3-release
+# 通过 workflow_call 调用，此时 github.workflow 是调用方的名字（曾因此与顶层
+# 工作流撞组，触发 concurrency deadlock 被取消）
+concurrency:
+  group: gaokun3-package-debs-${{ github.ref }}
+  cancel-in-progress: false
+
 jobs:
   build-package-debs:
     outputs:
@@ -53,21 +61,33 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v6
 
-      - name: Checkout Linux source
-        uses: actions/checkout@v6
-        with:
-          repository: torvalds/linux
-          ref: ${{ env.KERNEL_TAG }}
-          fetch-depth: 1
-          path: build-packages/mainline-linux
-
       - name: Install host dependencies
         run: |
           set -euxo pipefail
           sudo apt-get update
           sudo apt-get install -y \
             git make gcc bc bison flex cpio rsync kmod \
-            libssl-dev libelf-dev dwarves ccache dpkg-dev
+            libssl-dev libelf-dev dwarves ccache dpkg-dev aria2 xz-utils
+
+      - name: Download Linux source tarball
+        run: |
+          set -euxo pipefail
+          kern_ver="${KERNEL_TAG#v}"
+          mkdir -p build-packages/mainline-linux
+          aria2c -x 4 -s 4 -d build-packages -o linux.tar.xz \
+            "https://cdn.kernel.org/pub/linux/kernel/v${kern_ver%%.*}.x/linux-${kern_ver}.tar.xz" || \
+          aria2c -x 4 -s 4 -d build-packages -o linux.tar.xz \
+            "https://mirrors.edge.kernel.org/pub/linux/kernel/v${kern_ver%%.*}.x/linux-${kern_ver}.tar.xz"
+          tar -xJf build-packages/linux.tar.xz -C build-packages/mainline-linux --strip-components=1
+          cd build-packages/mainline-linux
+          git init -q
+          # 一次性仓库：禁用 gc。gc --auto 检测到大量松散对象后会在后台 repack/prune，
+          # 与后续脚本对源码树的快照拷贝竞态（对象被中途删除导致 ENOENT）
+          git config gc.auto 0
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add .
+          git -c commit.gpgsign=false commit -q -m "Linux ${KERNEL_TAG} baseline"
 
       - name: Resolve package release tag
         id: release_meta
@@ -88,7 +108,7 @@ jobs:
         uses: actions/cache@v5
         with:
           path: ~/.ccache
-          key: gaokun3-packages-deb-ccache-${{ env.KERNEL_TAG }}-${{ env.BUILD_EL2 }}-${{ hashFiles('patches/*.patch', 'patches/el2/*.patch', 'defconfig/**', 'dts/**', 'drivers/**', 'packaging/**', 'firmware/**', 'scripts/ci/*.sh', '.github/workflows/gaokun3-package-debs.yml') }}
+          key: gaokun3-packages-deb-ccache-${{ env.KERNEL_TAG }}-${{ env.BUILD_EL2 }}-${{ hashFiles('patches/**/*.patch', 'defconfig/**', 'dts/**', 'drivers/**', 'packaging/**', 'firmware/**', 'scripts/ci/*.sh', '.github/workflows/gaokun3-package-debs.yml') }}
           restore-keys: |
             gaokun3-packages-deb-ccache-${{ env.KERNEL_TAG }}-
             gaokun3-packages-deb-ccache-
@@ -105,10 +125,22 @@ jobs:
           chmod +x scripts/ci/70_build_package_debs.sh
           scripts/ci/70_build_package_debs.sh
 
+      # 上传/发布阶段只读 ARTIFACT_DIR；内核树、构建输出与打包 staging 在此已无用。
+      # 构建累计占用 15G+，ARM runner 磁盘紧张，不清理会导致后续步骤创建临时目录失败（ENOSPC）
+      - name: Free disk space before uploads
+        run: |
+          set -euxo pipefail
+          sudo rm -rf \
+            "$KERN_SRC" "$KERN_SRC_BASE" "$KERN_OUT" "$KERN_OUT_EL2" \
+            "$WORKDIR/debbuild" "$WORKDIR/package-buildroots" \
+            "$WORKDIR/linux.tar.xz"
+          df -h /
+
       - name: Upload build artifacts (workflow)
         uses: actions/upload-artifact@v6
         with:
           name: gaokun3-package-debs
+          compression-level: 0 # DEB 内部已是 xz/zstd 压缩数据，跳过 zip 二次压缩省临时盘与时间
           path: |
             ${{ env.ARTIFACT_DIR }}/*.deb
             ${{ env.ARTIFACT_DIR }}/package-manifest.json
@@ -117,7 +149,7 @@ jobs:
       - name: Publish package release
         uses: softprops/action-gh-release@v2.6.1
         with:
-          tag_name: ${{ steps.release_meta.outputs.package_release_tag }}
+          tag_name: ${{ env.PACKAGE_RELEASE_TAG }}
           name: gaokun3 package DEBs - ${{ env.KERNEL_TAG }}${{ env.BUILD_EL2 == 'true' && ' + EL2' || '' }}
           body_path: ${{ env.ARTIFACT_DIR }}/package-release-body.md
           prerelease: false

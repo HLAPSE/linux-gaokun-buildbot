@@ -62,7 +62,8 @@ sudo mount -o subvol=@var "${LOOP}p2" "$MNT/var"
 sudo mkdir -p "$MNT/boot/efi"
 sudo mount "${LOOP}p1" "$MNT/boot/efi"
 
-sudo rsync -aHAX "$ROOTFS_DIR/" "$MNT/"
+# --chown=root:root：rsync -a 会把源根目录的属主带到镜像 / 上（CI 里 ROOTFS_DIR 属于 runner 用户）
+sudo rsync -aHAX --chown=root:root "$ROOTFS_DIR/" "$MNT/"
 install_common_image_assets "$MNT" "$GAOKUN_DIR"
 
 sudo tee "$MNT/etc/fstab" >/dev/null <<EOF
@@ -105,8 +106,35 @@ install -d -m 0755 /home/user/.config
 install -Dm644 /usr/local/share/gaokun/monitors.xml /home/user/.config/monitors.xml
 chown -R user:user /home/user
 
+# GDM 自动登录：平板形态 + 补丁测试场景（触屏失效时无需键盘输密码）
+# 如需关闭，注释掉下面两行 AutomaticLogin 即可
+cat > /etc/gdm/custom.conf <<'EOF'
+[daemon]
+AutomaticLoginEnable=True
+AutomaticLogin=user
+EOF
+
 systemctl enable gdm NetworkManager sshd \
-  gdm-monitor-sync.service patch-nvm-bdaddr.service || true
+  gdm-monitor-sync.service gaokun-grow-rootfs.service \
+  patch-nvm-bdaddr.service || true
+
+# 平板桌面场景没有需要等网络的本机服务/mount，wait-online 在 Wi-Fi 下白等 7s+，禁用之
+systemctl disable NetworkManager-wait-online.service || true
+
+# 编译 system-db:local（screen-keyboard-enabled 等镜像默认值）进 dconf 数据库
+# dconf 由 dconf 包提供（构建时已显式安装）；缺失直接失败，避免屏幕键盘等默认值静默丢失
+command -v dconf >/dev/null 2>&1 || { echo "ERROR: dconf not available in chroot (install dconf)" >&2; exit 1; }
+dconf update
+
+# 双击 .rpm 用 GNOME Software 打开
+if [[ -f /usr/share/applications/org.gnome.Software.desktop ]]; then
+  install -d -m 0755 /etc/xdg
+  printf '[Default Applications]\napplication/x-rpm=org.gnome.Software.desktop\n' > /etc/xdg/mimeapps.list
+fi
+
+# 时区：中国区默认 Asia/Shanghai（chroot 内 timedatectl 不可用，用符号链接；
+# /etc/timezone 是 Debian 系专属文件，Fedora 不读取，无需写入）
+ln -sf /usr/share/zoneinfo/Asia/Shanghai /etc/localtime
 
 cat > /etc/dracut.conf.d/matebook.conf <<'MODEOF'
 hostonly="no"
@@ -121,18 +149,15 @@ EOF
 install -d /etc/kernel/install.d
 ln -sf /dev/null /etc/kernel/install.d/51-dracut-rescue.install
 
+# 参数分组（bring-up 历史遗留，无硬件逐项验证前不擅自摘除，与 Ubuntu 镜像保持一致；
+# clk_ignore_unused/pd_ignore_unused/usbcore.autosuspend=-1 是续航相关参数，
+# 稳定后可逐项摘除实验，摘掉 autosuspend 需重点验证华为 EC(0x12d1:0x10b8) 唤醒后是否失灵）：
+#   arm64.nopauth 关指针认证; iommu.passthrough=0 + strict=0 lazy DMA 映射;
+#   pcie_aspm 链路省电; efi=noruntime 禁用不稳定的 UEFI RT; fbcon=rotate:1 竖屏 TTY;
+#   usbhid.quirks 0x20000000 = NO_INIT_REPORTS; 其余为控制台/日志设置
 cat > /etc/kernel/cmdline <<EOF
-root=UUID=$ROOT_UUID rootflags=subvol=@ clk_ignore_unused pd_ignore_unused arm64.nopauth iommu.passthrough=0 iommu.strict=0 pcie_aspm.policy=powersupersave efi=noruntime fbcon=rotate:1 usbhid.quirks=0x12d1:0x10b8:0x20000000 consoleblank=0 loglevel=4 psi=1
+root=UUID=$ROOT_UUID rootflags=subvol=@ clk_ignore_unused pd_ignore_unused arm64.nopauth iommu.passthrough=0 iommu.strict=0 pcie_aspm.policy=powersupersave efi=noruntime fbcon=rotate:1 usbcore.autosuspend=-1 usbhid.quirks=0x12d1:0x10b8:0x20000000 consoleblank=0 loglevel=4 psi=1
 EOF
-
-cat > /etc/kernel/devicetree <<'EOF'
-qcom/sc8280xp-huawei-gaokun3.dtb
-EOF
-
-dracut --force --kver "$KREL"
-if [[ "$BUILD_EL2" == "true" && -n "$KREL_EL2" ]]; then
-  dracut --force --kver "$KREL_EL2"
-fi
 
 rm -f /etc/machine-id
 systemd-machine-id-setup
@@ -140,41 +165,32 @@ MACHINE_ID="$(cat /etc/machine-id)"
 
 bootctl --no-variables --esp-path=/boot/efi install
 
-run_kernel_install() {
+# /etc/kernel/{install.conf,cmdline,devicetree} 就是 kernel-install 的默认配置位置：
+# 按内核变体切换 cmdline / devicetree 后，dracut 与 kernel-install 依次复用，
+# 无需再为每次 kernel-install 构造临时 KERNEL_INSTALL_CONF_ROOT 目录
+install_kernel_variant() {
   local krel="$1"
-  local image="$2"
-  local dtb="$3"
-  local cmdline="$4"
-  local conf_root
+  local dtb="$2"
+  local cmdline="$3"
 
-  conf_root="$(mktemp -d)"
-  cat > "$conf_root/install.conf" <<'EOF'
-layout=bls
-EOF
-  printf '%s\n' "$cmdline" > "$conf_root/cmdline"
-  printf 'qcom/%s\n' "$dtb" > "$conf_root/devicetree"
-
+  printf '%s\n' "$cmdline" > /etc/kernel/cmdline
+  printf 'qcom/%s\n' "$dtb" > /etc/kernel/devicetree
+  dracut --force --kver "$krel"
   kernel-install --entry-token=machine-id remove "$krel" || true
-  KERNEL_INSTALL_CONF_ROOT="$conf_root" \
-    kernel-install --verbose --make-entry-directory=yes --entry-token=machine-id add \
-    "$krel" "$image"
-  rm -rf "$conf_root"
+  kernel-install --verbose --make-entry-directory=yes --entry-token=machine-id add \
+    "$krel" "/boot/vmlinuz-$krel"
 }
 
 BASE_CMDLINE="$(cat /etc/kernel/cmdline)"
-run_kernel_install \
-  "$KREL" \
-  "/boot/vmlinuz-$KREL" \
-  "sc8280xp-huawei-gaokun3.dtb" \
-  "$BASE_CMDLINE"
-
+install_kernel_variant "$KREL" "sc8280xp-huawei-gaokun3.dtb" "$BASE_CMDLINE"
 if [[ "$BUILD_EL2" == "true" && -n "$KREL_EL2" ]]; then
-  EL2_CMDLINE="${BASE_CMDLINE} modprobe.blacklist=simpledrm"
-  run_kernel_install \
-    "$KREL_EL2" \
-    "/boot/vmlinuz-$KREL_EL2" \
-    "sc8280xp-huawei-gaokun3-el2.dtb" \
-    "$EL2_CMDLINE"
+  install_kernel_variant "$KREL_EL2" "sc8280xp-huawei-gaokun3-el2.dtb" \
+    "${BASE_CMDLINE} modprobe.blacklist=simpledrm"
+
+  # EL2 内核的 BLS 条目生成完毕，把 /etc/kernel 默认值恢复为标准内核的 cmdline / devicetree：
+  # 设备上后续安装新内核时，kernel-install 会复用这里的默认值
+  printf '%s\n' "$BASE_CMDLINE" > /etc/kernel/cmdline
+  printf 'qcom/%s\n' "sc8280xp-huawei-gaokun3.dtb" > /etc/kernel/devicetree
 fi
 
 cat > /boot/efi/loader/loader.conf <<EOF
