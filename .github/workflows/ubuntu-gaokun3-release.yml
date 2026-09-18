@@ -76,7 +76,7 @@ jobs:
 
     steps:
       - name: Checkout
-        uses: actions/checkout@v6
+        uses: actions/checkout@v7
 
       - name: Install host dependencies
         run: |
@@ -352,14 +352,14 @@ jobs:
         run: scripts/ci/60_package_release_ubuntu.sh
 
       - name: Upload build artifacts (workflow)
-        uses: actions/upload-artifact@v6
+        uses: actions/upload-artifact@v7
         with:
           name: ubuntu-gaokun3-build
           compression-level: 0 # .zst 已是压缩数据，跳过 zip 打包的重复压缩
           path: ${{ env.ARTIFACT_DIR }}/${{ steps.package.outputs.package_glob }}
 
       - name: Create GitHub Release
-        uses: softprops/action-gh-release@v2.6.1
+        uses: softprops/action-gh-release@v3
         with:
           tag_name: ${{ steps.package.outputs.tag_name }}
           name: Ubuntu ${{ env.UBUNTU_RELEASE }} - gaokun3 - ${{ steps.package.outputs.kernel_release }}

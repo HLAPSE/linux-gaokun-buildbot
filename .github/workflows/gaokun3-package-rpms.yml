@@ -59,7 +59,7 @@ jobs:
 
     steps:
       - name: Checkout
-        uses: actions/checkout@v6
+        uses: actions/checkout@v7
 
       - name: Install host dependencies
         run: |
@@ -105,7 +105,7 @@ jobs:
           echo "PACKAGE_RELEASE_TAG=$package_release_tag" >> "$GITHUB_ENV"
 
       - name: Restore ccache
-        uses: actions/cache@v5
+        uses: actions/cache@v6
         with:
           path: ~/.ccache
           key: gaokun3-packages-rpm-ccache-${{ env.KERNEL_TAG }}-${{ env.BUILD_EL2 }}-${{ hashFiles('patches/**/*.patch', 'defconfig/**', 'dts/**', 'drivers/**', 'packaging/**', 'firmware/**', 'scripts/ci/*.sh', '.github/workflows/gaokun3-package-rpms.yml') }}
@@ -156,7 +156,7 @@ jobs:
           df -h /
 
       - name: Upload build artifacts (workflow)
-        uses: actions/upload-artifact@v6
+        uses: actions/upload-artifact@v7
         with:
           name: gaokun3-package-rpms
           compression-level: 0 # RPM 内部已是压缩数据，跳过 zip 二次压缩省临时盘与时间
@@ -166,7 +166,7 @@ jobs:
             ${{ env.ARTIFACT_DIR }}/package-release-body.md
 
       - name: Publish package release
-        uses: softprops/action-gh-release@v2.6.1
+        uses: softprops/action-gh-release@v3
         with:
           tag_name: ${{ env.PACKAGE_RELEASE_TAG }}
           name: gaokun3 package RPMs - ${{ env.KERNEL_TAG }}${{ env.BUILD_EL2 == 'true' && ' + EL2' || '' }}
