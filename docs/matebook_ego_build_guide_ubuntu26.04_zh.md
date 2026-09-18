@@ -45,10 +45,10 @@ sudo apt-get install -y \
 mkdir -p ~/gaokun/matebook-build-ubuntu
 
 cd ~/gaokun
-# 获取指定版本的 Linux 主线源码
+# 获取指定版本的 Linux stable 源码（vX.Y.Z 标签只存在于 stable 树）
 if [ ! -d "mainline-linux" ]; then
-    git clone --depth 1 --branch v7.2-rc2 \
-        https://git.kernel.org/pub/scm/linux/kernel/git/torvalds/linux.git \
+    git clone --depth 1 --branch v7.2.5 \
+        https://git.kernel.org/pub/scm/linux/kernel/git/stable/linux.git \
         mainline-linux
 fi
 ```
@@ -224,7 +224,8 @@ apt-get install -y \
     language-pack-gnome-zh-hans \
     fonts-noto-cjk \
     fonts-noto-color-emoji \
-    fcitx5-chinese-addons \
+    ibus-libpinyin \
+    dconf-cli \
     gnome-tweaks gnome-shell-extension-manager \
     mpv v4l-utils vim nano ripgrep git htop screen \
     alsa-utils pipewire-alsa \
@@ -322,7 +323,7 @@ sudo cp $GAOKUN_DIR/tools/audio/sc8280xp.conf \
 
 # 复用 CI 镜像流水线里的共享资源
 sudo mkdir -p $ROOTFS_DIR/usr/local/share/gaokun
-sudo cp -a $GAOKUN_DIR/tools/image-assets/etc/. \
+sudo cp -a --no-preserve=ownership $GAOKUN_DIR/tools/image-assets/etc/. \
     $ROOTFS_DIR/etc/
 sudo cp $GAOKUN_DIR/tools/image-assets/usr/local/share/gaokun/monitors.xml \
     $ROOTFS_DIR/usr/local/share/gaokun/monitors.xml
@@ -394,7 +395,7 @@ sudo mount ${LOOP}p2 $MNT
 sudo mkdir -p $MNT/boot/efi
 sudo mount ${LOOP}p1 $MNT/boot/efi
 
-sudo rsync -aHAX --info=progress2 --exclude='/proc/*' --exclude='/sys/*' --exclude='/dev/*' --exclude='/run/*' $ROOTFS_DIR/ $MNT/
+sudo rsync -aHAX --chown=root:root --info=progress2 --exclude='/proc/*' --exclude='/sys/*' --exclude='/dev/*' --exclude='/run/*' $ROOTFS_DIR/ $MNT/
 
 sudo tee $MNT/etc/fstab > /dev/null <<EOF
 UUID=${ROOT_UUID}  /         ext4   errors=remount-ro,noatime  0  1
@@ -436,12 +437,11 @@ cat > /etc/kernel/cmdline <<EOF
 root=UUID=${ROOT_UUID} clk_ignore_unused pd_ignore_unused arm64.nopauth iommu.passthrough=0 iommu.strict=0 pcie_aspm.policy=powersupersave modprobe.blacklist=simpledrm efi=noruntime fbcon=rotate:1 usbhid.quirks=0x12d1:0x10b8:0x20000000 consoleblank=0 loglevel=4 psi=1
 EOF
 
-cat > /etc/kernel/devicetree <<EOF
-qcom/sc8280xp-huawei-gaokun3.dtb
-EOF
-
 systemctl enable gdm-monitor-sync.service \
     patch-nvm-bdaddr.service
+
+# 桌面场景无需等待网络就绪，Wi-Fi 下该服务会白等 7s 以上
+systemctl disable NetworkManager-wait-online.service || true
 
 cat > /etc/systemd/system/gaokun-fix-x11-unix.service <<'EOF'
 [Unit]
@@ -459,18 +459,19 @@ EOF
 
 systemctl enable gaokun-fix-x11-unix.service
 
-run_update_initramfs() {
+# /etc/kernel/{install.conf,cmdline,devicetree} 就是 kernel-install 的默认配置位置：
+# 按内核变体切换 devicetree 后，update-initramfs 与 kernel-install 依次复用，
+# 无需再为每次 kernel-install 构造临时 KERNEL_INSTALL_CONF_ROOT 目录
+install_kernel_variant() {
     local krel="$1"
     local dtb="$2"
 
     printf 'qcom/%s\n' "$dtb" > /etc/kernel/devicetree
     update-initramfs -c -k "$krel"
+    kernel-install --entry-token=machine-id remove "$krel" || true
+    kernel-install --make-entry-directory=yes --entry-token=machine-id add \
+        "$krel" "/boot/vmlinuz-$krel" "/boot/initrd.img-$krel"
 }
-
-run_update_initramfs $KREL sc8280xp-huawei-gaokun3.dtb
-if [ -n "$KREL_EL2" ]; then
-    run_update_initramfs $KREL_EL2 sc8280xp-huawei-gaokun3-el2.dtb
-fi
 
 rm -f /etc/machine-id
 systemd-machine-id-setup
@@ -478,27 +479,13 @@ MACHINE_ID=$(cat /etc/machine-id)
 
 bootctl --no-variables --esp-path=/boot/efi install
 
-kernel-install --make-entry-directory=yes --entry-token=machine-id add \
-    $KREL /boot/vmlinuz-$KREL /boot/initrd.img-$KREL
+install_kernel_variant $KREL sc8280xp-huawei-gaokun3.dtb
 
 if [ -n "$KREL_EL2" ]; then
     mkdir -p /boot/efi/EFI/systemd/drivers
     mkdir -p /boot/efi/firmware/qcom/sc8280xp/HUAWEI/gaokun3
 
-    EL2_CONF_ROOT=$(mktemp -d)
-    cat > $EL2_CONF_ROOT/install.conf <<EOF
-layout=bls
-EOF
-    cat > $EL2_CONF_ROOT/cmdline <<EOF
-root=UUID=${ROOT_UUID} clk_ignore_unused pd_ignore_unused arm64.nopauth iommu.passthrough=0 iommu.strict=0 pcie_aspm.policy=powersupersave modprobe.blacklist=simpledrm efi=noruntime fbcon=rotate:1 usbhid.quirks=0x12d1:0x10b8:0x20000000 consoleblank=0 loglevel=4 psi=1
-EOF
-    cat > $EL2_CONF_ROOT/devicetree <<EOF
-qcom/sc8280xp-huawei-gaokun3-el2.dtb
-EOF
-    KERNEL_INSTALL_CONF_ROOT=$EL2_CONF_ROOT \
-        kernel-install --make-entry-directory=yes --entry-token=machine-id add \
-        $KREL_EL2 /boot/vmlinuz-$KREL_EL2 /boot/initrd.img-$KREL_EL2
-    rm -rf $EL2_CONF_ROOT
+    install_kernel_variant $KREL_EL2 sc8280xp-huawei-gaokun3-el2.dtb
 
     cp $GAOKUN_DIR/tools/el2/slbounceaa64.efi /boot/efi/EFI/systemd/drivers/
     cp $GAOKUN_DIR/tools/el2/qebspilaa64.efi /boot/efi/EFI/systemd/drivers/
@@ -527,6 +514,26 @@ exit
 - 默认使用 `--entry-token=machine-id`，所以最终条目文件名会是 `/boot/efi/loader/entries/<machine-id>-<kernel-release>.conf`。
 - 内核、`initrd` 和 DTB 会自动复制到 `/boot/efi/<machine-id>/<kernel-release>/` 下；这正是 BLS Type #1 的标准目录布局。
 
+### 中文输入法（GNOME 原生 ibus + 屏幕键盘）预设
+
+本镜像针对「纯触屏输入中文」这一场景，内置了以下默认配置，均为用户态，不涉及内核，与 Fedora 构建通用：
+
+- **CJK 字体**：安装 `fonts-noto-cjk`（已在基础包清单中），保证中文候选/界面不出现方框方块。
+- **中文输入**：走 GNOME 原生 ibus，`/etc/dconf/db/local.d/01-input-sources` 把输入源预设为「美式键盘 + 智能拼音（libpinyin）」，`ibus-libpinyin` 已在包清单中。Super+空格 切换中英文。
+- **屏幕键盘**：`/etc/dconf/db/local.d/00-screen-keyboard` 设 `screen-keyboard-enabled=true`，触摸屏点按输入框自动弹出。
+- **dconf 默认 profile**：`/etc/dconf/profile/user`（`user-db:user` + `system-db:local`）。缺少该文件时 dconf 找不到 system 库，上述默认值会全部静默失效。
+
+> **为什么不用 fcitx5**：GNOME Wayland 下屏幕键盘依赖 Shell 的 text-input→ibus 链路；`GTK_IM_MODULE=fcitx` 会让应用绕开该协议直连 fcitx5，且 fcitx5 的 ibus 兼容前端会抢注 `org.freedesktop.IBus` 总线名，两者都会导致触摸呼不出屏幕键盘（实测已验证）。
+
+手动构建时，把上述 3 个小文件按路径放进 `$ROOTFS_DIR`，并在「第 4 步 chroot 初始化」末尾补一行使其生效：
+
+```bash
+# dconf-cli 已包含在第三步的包清单中；若提示 command not found，说明漏装了
+dconf update
+```
+
+> 候选面板的字号等外观项可在「设置 → 键盘 → 输入源」及 ibus 设置里按需调整。
+
 ### 4. 收尾清理
 
 ```bash
@@ -542,3 +549,4 @@ sudo losetup -d $LOOP
 - 双系统覆盖 EFI 的方式请参考 [dual_boot_guide_zh.md](dual_boot_guide_zh.md)
 - 如果在本指南中同时构建了 `-gaokun3-el2` 内核变体，产出的镜像就已经具备 EL2 支持。
 - 有关实现细节、启动链结构和排障说明，请参考 [el2_kvm_guide_zh.md](el2_kvm_guide_zh.md)
+- CI 流水线产出的镜像默认带 `user` 账号（密码同为 `user`，且免密 sudo），首次启动后请尽快执行 `passwd` 修改密码。

@@ -42,10 +42,10 @@ sudo dnf install gcc make bison flex bc openssl-devel elfutils-libelf-devel \
 mkdir -p ~/gaokun/matebook-build-fedora
 
 cd ~/gaokun
-# 获取指定版本的 Linux 主线源码
+# 获取指定版本的 Linux stable 源码（vX.Y.Z 标签只存在于 stable 树）
 if [ ! -d "mainline-linux" ]; then
-    git clone --depth 1 --branch v7.2-rc2 \
-        https://git.kernel.org/pub/scm/linux/kernel/git/torvalds/linux.git \
+    git clone --depth 1 --branch v7.2.5 \
+        https://git.kernel.org/pub/scm/linux/kernel/git/stable/linux.git \
         mainline-linux
 fi
 ```
@@ -161,7 +161,9 @@ sudo dnf --installroot=$ROOTFS_DIR --releasever=44 --forcearch=aarch64 --use-hos
     --exclude=gnome-boxes,gnome-connections,snapshot,gnome-weather,gnome-contacts,gnome-maps,simple-scan,gnome-clocks,gnome-calculator,gnome-calendar,amd-gpu-firmware,intel-gpu-firmware,linux-firmware,nvidia-gpu-firmware,toolbox,unoconv,mediawriter \
     install \
     @gnome-desktop @workstation-product \
-    fcitx5-chinese-addons gnome-tweaks gnome-extensions-app telnet mpv v4l-utils vim nano ripgrep git htop fastfetch screen firefox
+    ibus-libpinyin \
+    dconf \
+    google-noto-sans-cjk-fonts gnome-tweaks gnome-extensions-app telnet mpv v4l-utils vim nano ripgrep git htop fastfetch screen firefox
 
 # 安装 RPMFusion 并添加 libavcodec-freeworld（硬解视频编码支持）
 sudo dnf --installroot=$ROOTFS_DIR --releasever=44 --forcearch=aarch64 --use-host-config -y \
@@ -175,6 +177,7 @@ sudo dnf --installroot=$ROOTFS_DIR --releasever=44 --forcearch=aarch64 --use-hos
     --setopt=reposdir="$ROOTFS_DIR/etc/yum.repos.d,/etc/yum.repos.d" \
     install \
     libavcodec-freeworld
+
 ```
 
 安装内核、模块、固件和本地工具：
@@ -259,7 +262,7 @@ sudo cp $GAOKUN_DIR/tools/audio/sc8280xp.conf \
 
 # 复用 CI 镜像流水线里的共享资源
 sudo mkdir -p $ROOTFS_DIR/usr/local/share/gaokun
-sudo cp -a $GAOKUN_DIR/tools/image-assets/etc/. \
+sudo cp -a --no-preserve=ownership $GAOKUN_DIR/tools/image-assets/etc/. \
     $ROOTFS_DIR/etc/
 sudo cp $GAOKUN_DIR/tools/image-assets/usr/local/share/gaokun/monitors.xml \
     $ROOTFS_DIR/usr/local/share/gaokun/monitors.xml
@@ -312,7 +315,7 @@ sudo mount -o subvol=@var ${LOOP}p2 /mnt/ego-fedora/var
 sudo mkdir -p /mnt/ego-fedora/boot/efi
 sudo mount ${LOOP}p1 /mnt/ego-fedora/boot/efi
 
-sudo rsync -aHAX --info=progress2 --exclude='/proc/*' --exclude='/sys/*' --exclude='/dev/*' --exclude='/run/*' $ROOTFS_DIR/ /mnt/ego-fedora/
+sudo rsync -aHAX --chown=root:root --info=progress2 --exclude='/proc/*' --exclude='/sys/*' --exclude='/dev/*' --exclude='/run/*' $ROOTFS_DIR/ /mnt/ego-fedora/
 
 sudo tee /mnt/ego-fedora/etc/fstab > /dev/null <<EOF
 UUID=${ROOT_UUID}  /         btrfs  subvol=@,compress=zstd:1,ssd,noatime  0  0
@@ -367,17 +370,11 @@ cat > /etc/kernel/cmdline <<EOF
 root=UUID=${ROOT_UUID} rootflags=subvol=@ clk_ignore_unused pd_ignore_unused arm64.nopauth iommu.passthrough=0 iommu.strict=0 pcie_aspm.policy=powersupersave efi=noruntime fbcon=rotate:1 usbhid.quirks=0x12d1:0x10b8:0x20000000 consoleblank=0 loglevel=4 psi=1
 EOF
 
-cat > /etc/kernel/devicetree <<EOF
-qcom/sc8280xp-huawei-gaokun3.dtb
-EOF
-
 systemctl enable gdm-monitor-sync.service \
     patch-nvm-bdaddr.service
 
-dracut --force --kver $KREL
-if [ -n "$KREL_EL2" ]; then
-    dracut --force --kver $KREL_EL2
-fi
+# 桌面场景无需等待网络就绪，Wi-Fi 下该服务会白等 7s 以上
+systemctl disable NetworkManager-wait-online.service || true
 
 rm -f /etc/machine-id
 systemd-machine-id-setup
@@ -385,27 +382,36 @@ MACHINE_ID=$(cat /etc/machine-id)
 
 bootctl --no-variables --esp-path=/boot/efi install
 
-kernel-install --make-entry-directory=yes --entry-token=machine-id add \
-    $KREL /boot/vmlinuz-$KREL
+# /etc/kernel/{install.conf,cmdline,devicetree} 就是 kernel-install 的默认配置位置：
+# 按内核变体切换 cmdline / devicetree 后，dracut 与 kernel-install 依次复用，
+# 无需再为每次 kernel-install 构造临时 KERNEL_INSTALL_CONF_ROOT 目录
+install_kernel_variant() {
+    local krel="$1"
+    local dtb="$2"
+    local cmdline="$3"
+
+    printf '%s\n' "$cmdline" > /etc/kernel/cmdline
+    printf 'qcom/%s\n' "$dtb" > /etc/kernel/devicetree
+    dracut --force --kver "$krel"
+    kernel-install --entry-token=machine-id remove "$krel" || true
+    kernel-install --make-entry-directory=yes --entry-token=machine-id add \
+        "$krel" "/boot/vmlinuz-$krel"
+}
+
+BASE_CMDLINE=$(cat /etc/kernel/cmdline)
+install_kernel_variant $KREL sc8280xp-huawei-gaokun3.dtb "$BASE_CMDLINE"
 
 if [ -n "$KREL_EL2" ]; then
     mkdir -p /boot/efi/EFI/systemd/drivers
     mkdir -p /boot/efi/firmware/qcom/sc8280xp/HUAWEI/gaokun3
 
-    EL2_CONF_ROOT=$(mktemp -d)
-    cat > $EL2_CONF_ROOT/install.conf <<EOF
-layout=bls
-EOF
-    cat > $EL2_CONF_ROOT/cmdline <<EOF
-root=UUID=${ROOT_UUID} rootflags=subvol=@ clk_ignore_unused pd_ignore_unused arm64.nopauth iommu.passthrough=0 iommu.strict=0 pcie_aspm.policy=powersupersave modprobe.blacklist=simpledrm efi=noruntime fbcon=rotate:1 usbhid.quirks=0x12d1:0x10b8:0x20000000 consoleblank=0 loglevel=4 psi=1
-EOF
-    cat > $EL2_CONF_ROOT/devicetree <<EOF
-qcom/sc8280xp-huawei-gaokun3-el2.dtb
-EOF
-    KERNEL_INSTALL_CONF_ROOT=$EL2_CONF_ROOT \
-        kernel-install --make-entry-directory=yes --entry-token=machine-id add \
-        $KREL_EL2 /boot/vmlinuz-$KREL_EL2
-    rm -rf $EL2_CONF_ROOT
+    install_kernel_variant $KREL_EL2 sc8280xp-huawei-gaokun3-el2.dtb \
+        "${BASE_CMDLINE} modprobe.blacklist=simpledrm"
+
+    # EL2 内核的 BLS 条目生成完毕，把 /etc/kernel 默认值恢复为标准内核的 cmdline / devicetree：
+    # 设备上后续安装新内核时，kernel-install 会复用这里的默认值
+    printf '%s\n' "$BASE_CMDLINE" > /etc/kernel/cmdline
+    printf 'qcom/%s\n' "sc8280xp-huawei-gaokun3.dtb" > /etc/kernel/devicetree
 
     cp $GAOKUN_DIR/tools/el2/slbounceaa64.efi /boot/efi/EFI/systemd/drivers/
     cp $GAOKUN_DIR/tools/el2/qebspilaa64.efi /boot/efi/EFI/systemd/drivers/
@@ -434,6 +440,27 @@ exit
 - 默认使用 `--entry-token=machine-id`，因此条目名会变成 `/boot/efi/loader/entries/<machine-id>-<kernel-release>.conf`。
 - Fedora 44 的 `90-loaderentry.install` 会从 `/usr/lib/modules/<kernel-release>/dtb/` 查找设备树，所以 DTB 必须放到这个标准路径里。
 - Fedora 默认的 `51-dracut-rescue.install` 会额外生成 `0-rescue` 启动项，但这个救援项默认不带 `devicetree`，在 gaokun3 上不可用，因此这里显式将其禁用。
+- EL2 内核安装完成后，`/etc/kernel/{cmdline,devicetree}` 会恢复为标准内核的默认值；设备上后续安装新内核时，`kernel-install` 直接复用这些默认值。
+
+### 中文输入法（GNOME 原生 ibus + 屏幕键盘）预设
+
+本镜像针对「纯触屏输入中文」这一场景，内置了以下默认配置，均为用户态，不涉及内核，与 Ubuntu 构建通用：
+
+- **CJK 字体**：安装 `google-noto-sans-cjk-fonts`，保证中文候选/界面不出现方框方块。
+- **中文输入**：走 GNOME 原生 ibus，`/etc/dconf/db/local.d/01-input-sources` 把输入源预设为「美式键盘 + 智能拼音（libpinyin）」，`ibus-libpinyin` 已在包清单中。Super+空格 切换中英文。
+- **屏幕键盘**：`/etc/dconf/db/local.d/00-screen-keyboard` 设 `screen-keyboard-enabled=true`，触摸屏点按输入框自动弹出。
+- **dconf 默认 profile**：`/etc/dconf/profile/user`（`user-db:user` + `system-db:local`）。缺少该文件时 dconf 找不到 system 库，上述默认值会全部静默失效。
+
+> **为什么不用 fcitx5**：GNOME Wayland 下屏幕键盘依赖 Shell 的 text-input→ibus 链路；`GTK_IM_MODULE=fcitx` 会让应用绕开该协议直连 fcitx5，且 fcitx5 的 ibus 兼容前端会抢注 `org.freedesktop.IBus` 总线名，两者都会导致触摸呼不出屏幕键盘（Ubuntu 构建上实测已验证）。
+
+手动构建时，把上述 3 个小文件按路径放进 `$ROOTFS_DIR`，并在「第 4 步 chroot 初始化」末尾补一行使其生效：
+
+```bash
+# dconf 已包含在第三步的包清单中；若提示 command not found，说明漏装了
+dconf update
+```
+
+> 候选面板的字号等外观项可在「设置 → 键盘 → 输入源」及 ibus 设置里按需调整。
 
 ### 触屏驱动鸣谢
 
@@ -455,3 +482,4 @@ sudo losetup -d $LOOP
 - 双系统覆盖 EFI 的方式请参考 [dual_boot_guide_zh.md](dual_boot_guide_zh.md)
 - 如果在本指南中同时构建了 `-gaokun3-el2` 内核变体，产出的镜像就已经具备 EL2 支持。
 - 有关实现细节、启动链结构和排障说明，请参考 [el2_kvm_guide_zh.md](el2_kvm_guide_zh.md)
+- CI 流水线产出的镜像默认带 `user` 账号（密码同为 `user`，且免密 sudo），首次启动后请尽快执行 `passwd` 修改密码。
