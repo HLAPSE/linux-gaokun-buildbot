@@ -31,6 +31,11 @@ on:
 permissions:
   contents: write
 
+# 同一分支/标签上的重跑只排队不互相取消：内核/包构建是长任务
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: false
+
 jobs:
   build-package-debs:
     outputs:

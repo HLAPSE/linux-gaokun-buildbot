@@ -33,6 +33,11 @@ on:
 permissions:
   contents: write
 
+# 同一分支/标签上的重跑只排队不互相取消：镜像构建是长任务，中途取消会浪费已完成的作业
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: false
+
 jobs:
   build-package-debs:
     if: ${{ github.event.inputs.rebuild_package_debs == 'true' }}
