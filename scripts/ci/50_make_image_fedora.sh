@@ -62,8 +62,11 @@ sudo mount -o subvol=@var "${LOOP}p2" "$MNT/var"
 sudo mkdir -p "$MNT/boot/efi"
 sudo mount "${LOOP}p1" "$MNT/boot/efi"
 
-# --chown=root:root：rsync -a 会把源根目录的属主带到镜像 / 上（CI 里 ROOTFS_DIR 属于 runner 用户）
-sudo rsync -aHAX --chown=root:root "$ROOTFS_DIR/" "$MNT/"
+# 不能用 --chown=root:root：它会把所有文件的属组刷成 root，破坏 wheel/shadow/dbus 等
+# 非 root 属组。只需在 rsync 后单独把镜像根目录属主改回 root
+# （CI 里 ROOTFS_DIR 顶层目录属于 runner 用户）。
+sudo rsync -aHAX "$ROOTFS_DIR/" "$MNT/"
+sudo chown root:root "$MNT"
 install_common_image_assets "$MNT" "$GAOKUN_DIR"
 
 sudo tee "$MNT/etc/fstab" >/dev/null <<EOF
