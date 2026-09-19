@@ -26,12 +26,15 @@ install_common_image_assets() {
     "tools/image-assets/etc/systemd/zram-generator.conf:/etc/systemd/zram-generator.conf"
     "tools/image-assets/etc/systemd/journald.conf.d/90-gaokun.conf:/etc/systemd/journald.conf.d/90-gaokun.conf"
     "tools/installer/gaokun-install.desktop:/usr/share/applications/gaokun-install.desktop"
+    # 屏蔽 Lenovo X13s 启用包, 防止软件更新器把它们连带一串依赖装到 gaokun3 上
+    "tools/image-assets/etc/apt/preferences.d/no-lenovo-x13s:/etc/apt/preferences.d/no-lenovo-x13s"
   )
   local asset src dest
 
   sudo mkdir -p \
     "$rootfs_dir/etc/modules-load.d" \
     "$rootfs_dir/etc/modprobe.d" \
+    "$rootfs_dir/etc/apt/preferences.d" \
     "$rootfs_dir/etc/dconf/db/local.d" \
     "$rootfs_dir/etc/dconf/profile" \
     "$rootfs_dir/etc/udev/rules.d" \

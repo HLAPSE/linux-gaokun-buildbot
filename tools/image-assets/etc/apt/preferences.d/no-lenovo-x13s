@@ -1,0 +1,11 @@
+# 屏蔽 Lenovo X13s 启用包：Ubuntu arm64 通道上它们是「X13s 硬件支持」元包，
+# 软件更新器一旦选中 hwe-lenovo-x13s-meta 会连带装进 libcamera/qrtr/
+# protection-domain-mapper 一整串依赖（线上复现过）。
+# 这套包的全部逻辑——蓝牙地址服务、udev 规则、initramfs hook——都被
+# DMI(product_family=ThinkPad X13s Gen 1) / DT 兼容性条件门控，在 gaokun3 上
+# 永远不会执行：白占空间，每次升级白跑 maintainer 脚本(daemon-reload +
+# 服务 restart)和 update-initramfs 触发器，用户还会在更新器里看到 Lenovo 包。
+# Pin -1 让 apt/update-manager 根本无法安装它们。
+Package: hwe-lenovo-x13s-meta ubuntu-x13s-settings ubuntu-x13s-settings-nogrub
+Pin: release *
+Pin-Priority: -1
