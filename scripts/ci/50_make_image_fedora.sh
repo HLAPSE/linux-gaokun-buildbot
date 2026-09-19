@@ -111,11 +111,14 @@ install -Dm644 /usr/local/share/gaokun/monitors.xml /home/user/.config/monitors.
 
 # 预置 user 级输入源（与系统级 dconf 默认一致，与 Ubuntu 镜像对齐）：
 # 不预置的话，首登的 gnome-initial-setup 键盘页会按 zh_CN locale 再追加一份智能拼音
+# mru-sources 一并预置：与 sources 保持完全一致，避免 shell 改写 mru-sources
+# 时把会话期多出来的引擎带回 sources（输入法重复问题）
 _user_kf_dir=$(mktemp -d)
 cat > "$_user_kf_dir/00-input-sources" <<'INPUT_SOURCES_EOF'
 [org/gnome/desktop/input-sources]
 current=uint32 0
 sources=[('xkb', 'us'), ('ibus', 'libpinyin')]
+mru-sources=[('xkb', 'us'), ('ibus', 'libpinyin')]
 xkb-options=@as []
 INPUT_SOURCES_EOF
 install -d -m 0755 /home/user/.config/dconf

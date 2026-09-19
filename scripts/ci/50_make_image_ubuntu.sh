@@ -103,11 +103,15 @@ install -Dm644 /usr/local/share/gaokun/monitors.xml /home/user/.config/monitors.
 # 首次登录的 gnome-initial-setup（--existing-user）键盘页会按 zh_CN locale
 # 再写一份 user 级输入源，与系统级默认叠加后出现重复的「智能拼音」；
 # 显式预置后，所有「未配置则按 locale 自动追加输入源」的逻辑都会跳过。
+# mru-sources 一并预置：线上复现过会话期 sources/mru-sources 同时多出一份
+# libpinyin（设置-键盘面板路径），用户库里保持两组键完全一致，shell 改写
+# mru-sources 时不会把多余的引擎带回 sources
 _user_kf_dir=$(mktemp -d)
 cat > "$_user_kf_dir/00-input-sources" <<'INPUT_SOURCES_EOF'
 [org/gnome/desktop/input-sources]
 current=uint32 0
 sources=[('xkb', 'us'), ('ibus', 'libpinyin')]
+mru-sources=[('xkb', 'us'), ('ibus', 'libpinyin')]
 xkb-options=@as []
 INPUT_SOURCES_EOF
 install -d -m 0755 /home/user/.config/dconf
