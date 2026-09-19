@@ -69,7 +69,7 @@ sudo mount -t proc proc "$MNT/proc"
 sudo mount -t sysfs sys "$MNT/sys"
 sudo mount -t tmpfs tmpfs "$MNT/run"
 
-sudo chroot "$MNT" /usr/bin/env KREL="$KREL" KREL_EL2="$KREL_EL2" BUILD_EL2="$BUILD_EL2" ROOT_UUID="$ROOT_UUID" /bin/bash -euxo pipefail <<'CHROOT_EOF'
+sudo chroot "$MNT" /usr/bin/env KREL="$KREL" KREL_EL2="$KREL_EL2" BUILD_EL2="$BUILD_EL2" ROOT_UUID="$ROOT_UUID" UBUNTU_RELEASE="$UBUNTU_RELEASE" /bin/bash -euxo pipefail <<'CHROOT_EOF'
 echo "ubuntu" > /etc/hostname
 id -u user >/dev/null 2>&1 || useradd -m -s /bin/bash -G sudo user
 echo "user:user" | chpasswd
