@@ -165,6 +165,15 @@ systemctl disable NetworkManager-wait-online.service || true
 command -v dconf >/dev/null 2>&1 || { echo "ERROR: dconf not available in chroot (install dconf-cli)" >&2; exit 1; }
 dconf update
 
+# Slim 步骤清空 /var/cache 与 /var/lib/apt/lists 时会把目录一并删掉。aptdaemon（软件
+# 更新器/gdebi 的后端）每个事务启动前要先锁 /var/lib/apt/lists/lock 与
+# /var/cache/apt/archives/lock，父目录缺失时它只会停在 STATUS_WAITING_LOCK 每 3s 盲
+# 重试、从不自建父目录（CLI apt 会自建所以不受影响），表现为软件更新器永远停在
+# 「等待其他软件管理程序退出」。这里按发行版原始属主重建：partial 归 _apt（运行期
+# 下载由 _apt 沙箱写入），锁文件本身的父目录归 root
+install -d -m 0755 /var/lib/apt/lists /var/cache/apt /var/cache/apt/archives /var/cache/swcatalog
+install -d -m 0700 -o _apt -g root /var/lib/apt/lists/partial /var/cache/apt/archives/partial
+
 # 构建期冒烟测试：完整走一遍「软件更新器」(update-manager) 的启动导入链
 # （gi/Handy → uaclient(ubuntu-pro-client) → UbuntuDrivers → DistUpgrade）。
 # 26.04 开发期 update-manager 与 python3-distupgrade 版本错配会导致启动即

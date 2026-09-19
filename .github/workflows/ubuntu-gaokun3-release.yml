@@ -365,7 +365,10 @@ jobs:
             "$ROOTFS_DIR/var/lib/apt/lists" \
             "$ROOTFS_DIR/var/log/apt" \
             "$ROOTFS_DIR/var/log/journal"
-          # 只清空内容、保留目录本身与权限位：后续 chroot 步骤的 mktemp、镜像内运行时都依赖 /tmp、/var/tmp、/var/cache
+          # 注意: find -delete 会把子目录连目录一起删掉（/var/cache/apt、/var/cache/swcatalog
+          # 等都会消失），并非只清空内容。/tmp、/var/tmp 本身保留即可；aptdaemon 依赖的
+          # /var/lib/apt/lists/partial、/var/cache/apt/archives/partial 等锁/下载目录由镜像
+          # chroot（scripts/ci/50_make_image_ubuntu.sh）在打包前按发行版原始属主统一重建
           sudo find "$ROOTFS_DIR/tmp" "$ROOTFS_DIR/var/tmp" "$ROOTFS_DIR/var/cache" -mindepth 1 -delete 2>/dev/null || true
           sudo du -sh "$ROOTFS_DIR"
 
