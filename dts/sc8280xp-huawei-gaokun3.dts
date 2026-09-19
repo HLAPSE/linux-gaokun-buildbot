@@ -1664,6 +1664,21 @@
 			drive-strength = <2>;
 			bias-disable;
 		};
+
+		/*
+		 * Host-interface select for the Himax HX83121A cascade IC.
+		 * The boot firmware happens to leave this pin high, which puts the IC
+		 * into I2C-HID mode; the IC then accepts SPI register access but never
+		 * reports touch data over SPI and never asserts its interrupt.
+		 * The pin has to be low before the touch firmware reloads.
+		 */
+		mode-n-pins {
+			pins = "gpio174";
+			function = "gpio";
+			drive-strength = <2>;
+			bias-disable;
+			output-low;
+		};
 	};
 
 	uart2_default: uart2-default-state {

@@ -68,6 +68,8 @@ git -C "$KERN_SRC" am "$GAOKUN_DIR"/patches/upstream/*.patch
 git -C "$KERN_SRC" am "$GAOKUN_DIR"/patches/others/*.patch
 git -C "$KERN_SRC" am "$GAOKUN_DIR"/patches/media/*.patch
 git -C "$KERN_SRC" am "$GAOKUN_DIR"/patches/0099-arm64-gaokun3-import-local-dts-and-defconfig.patch
+# 0100 基于社区 DTS(0099 之后)的触屏上下文, 必须在 0099 之后应用, 因此与其并列放 patches/ 根
+git -C "$KERN_SRC" am "$GAOKUN_DIR"/patches/0100-arm64-dts-qcom-sc8280xp-huawei-gaokun3-select-SPI-mode-for-touchscreen.patch
 
 ccache -z || true
 build_variant "$KERN_SRC" "$KERN_OUT"
