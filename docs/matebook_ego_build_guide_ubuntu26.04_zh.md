@@ -520,7 +520,7 @@ exit
 
 - **CJK 字体**：安装 `fonts-noto-cjk`（已在基础包清单中），保证中文候选/界面不出现方框方块。
 - **中文输入**：走 GNOME 原生 ibus，`/etc/dconf/db/local.d/01-input-sources` 把输入源预设为「美式键盘 + 智能拼音（libpinyin）」，`ibus-libpinyin` 已在包清单中。Super+空格 切换中英文。
-- **屏幕键盘**：`/etc/dconf/db/local.d/00-screen-keyboard` 设 `screen-keyboard-enabled=true`，触摸屏点按输入框自动弹出。
+- **屏幕键盘**：默认关闭（`/etc/dconf/db/local.d/00-screen-keyboard` 设 `screen-keyboard-enabled=false`，避免接键盘盖时被自动弹出干扰）。需要纯触摸输入时在「设置 → 辅助功能」打开，或把该值改为 `true` 并执行 `dconf update`。
 - **dconf 默认 profile**：`/etc/dconf/profile/user`（`user-db:user` + `system-db:local`）。缺少该文件时 dconf 找不到 system 库，上述默认值会全部静默失效。
 
 > **为什么不用 fcitx5**：GNOME Wayland 下屏幕键盘依赖 Shell 的 text-input→ibus 链路；`GTK_IM_MODULE=fcitx` 会让应用绕开该协议直连 fcitx5，且 fcitx5 的 ibus 兼容前端会抢注 `org.freedesktop.IBus` 总线名，两者都会导致触摸呼不出屏幕键盘（实测已验证）。

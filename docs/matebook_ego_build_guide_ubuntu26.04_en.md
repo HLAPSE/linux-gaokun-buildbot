@@ -521,7 +521,7 @@ Targeting the "touch-only Chinese input" scenario on this device, the image ship
 
 - **CJK fonts**: `fonts-noto-cjk` (already in the base package list) so Chinese candidates/UI never render as boxes.
 - **Chinese input**: native GNOME ibus — `/etc/dconf/db/local.d/01-input-sources` presets the input sources to "US keyboard + Intelligent Pinyin (libpinyin)"; `ibus-libpinyin` is in the package list. Switch languages with Super+Space.
-- **On-screen keyboard**: `/etc/dconf/db/local.d/00-screen-keyboard` sets `screen-keyboard-enabled=true`, so tapping a text field with the touchscreen brings up the OSK.
+- **On-screen keyboard**: disabled by default (`/etc/dconf/db/local.d/00-screen-keyboard` sets `screen-keyboard-enabled=false`, so the OSK does not pop up over a keyboard cover). For pure touch input, enable it under Settings → Accessibility, or set the key to `true` and run `dconf update`.
 - **dconf default profile**: `/etc/dconf/profile/user` (`user-db:user` + `system-db:local`). Without this file dconf cannot find the system database and all the defaults above silently fail.
 
 > **Why not fcitx5**: under GNOME Wayland the OSK depends on the Shell's text-input→ibus chain. `GTK_IM_MODULE=fcitx` makes apps bypass that protocol and talk to fcitx5 directly, and fcitx5's ibus compatibility frontend grabs the `org.freedesktop.IBus` bus name — either breaks touch-triggered OSK (verified on device).

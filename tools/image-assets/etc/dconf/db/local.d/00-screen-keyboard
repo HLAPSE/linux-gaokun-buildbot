@@ -1,2 +1,6 @@
+# 屏幕键盘默认关闭：设备常配键盘盖/外接键盘，OSK 随输入框自动弹出反而碍事。
+# 纯触摸使用时再打开：「设置 → 辅助功能 → 屏幕键盘」（按用户生效），
+# 或把下面的值改为 true 并执行 dconf update（系统级默认）。
+# 注意：GNOME Wayland 下 OSK 依赖 Shell 的 text-input→ibus 链路，换用 fcitx5 会使它失效。
 [org/gnome/desktop/a11y/applications]
-screen-keyboard-enabled=true
+screen-keyboard-enabled=false
