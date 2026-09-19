@@ -32,6 +32,26 @@ else
     warn "当前内核非 gaokun3 定制版本"
 fi
 
+# 机型变体鉴别: DMI 型号串不可靠(本系列机器一律报 GK-W7X), 以设备树 compatible
+# 与大核最高频率为准。判据来自 aoripus/easy-for-gaokun, 详见 docs/platform_notes_zh.md
+compat="$(tr -d '\0' < /proc/device-tree/compatible 2>/dev/null)"
+info "compatible: ${compat:-unknown}"
+maxfreq="$(cat /sys/devices/system/cpu/cpu4/cpufreq/cpuinfo_max_freq 2>/dev/null)"
+info "cpu4 max freq: ${maxfreq:-unknown} kHz"
+panel="$(tr '\0' ' ' < /proc/device-tree/soc@0/display-subsystem@ae00000/dsi@ae94000/panel@0/compatible 2>/dev/null)"
+[[ -n "$panel" ]] && info "panel: $panel"
+case "$compat" in
+    *gaokun3*sc8280xp*|*sc8280xp*gaokun3*)
+        case "$maxfreq" in
+            29*) ok "MateBook E Go 2022 性能版 (8cx Gen3, 大核 3.0GHz)" ;;
+            2[0-8]*) warn "MateBook E Go 2023 降频版 (大核约 2.69GHz), 频率/热设计与性能版不同" ;;
+            *) warn "gaokun3 设备树但大核频率 ${maxfreq:-?} kHz 无法判型, 请附上以上输出提 issue" ;;
+        esac ;;
+    *gaokun2*|*sc8180x*)
+        fail "MateBook E Go 2022 LTE 版 (gaokun2 / sc8180x): 本镜像不适用, 请勿安装" ;;
+    *) warn "未识别的设备树, 请确认机型" ;;
+esac
+
 # ---------------------------------------------------------------- 触摸屏
 hdr "触摸屏 (himax HX83121A)"
 if grep -qi himax /proc/bus/input/devices; then
