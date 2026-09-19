@@ -2,7 +2,7 @@
 
 # linux-gaokun-buildbot
 
-面向华为 MateBook E Go 2023（代号 `gaokun3`）、基于高通骁龙 8cx Gen3（`SC8280XP`）平台的 Linux 镜像构建脚本、补丁、内核配置、设备树文件、工具和固件。
+面向华为 MateBook E Go（代号 `gaokun3`）、基于高通骁龙 8cx Gen 3（`SC8280XP`）平台的 Linux 镜像构建脚本、补丁、内核配置、设备树文件、工具和固件。`gaokun3` 设备树同时覆盖 **2022 性能版**（GK-W76，大核 3.0 GHz）与 **2023 降频版**（大核约 2.69 GHz）——机型鉴别方法见[平台说明](platform_notes_zh.md)（DMI 型号串本身不可靠）。
 
 镜像流水线现默认使用 `systemd-boot`，并可选构建带 `CONFIG_LOCALVERSION="-gaokun3-el2"` 的第二套 EL2 内核变体。
 
@@ -45,8 +45,11 @@
 - `others/0004`：本仓库内的本地改动，修复启用 DSC 时 DPU 视频时序宽度截断问题
 - `others/0005`：来自 [right-0903/linux-gaokun](https://github.com/right-0903/linux-gaokun)，为 HX83121A 面板驱动添加背光供电
 - `others/0007`：本仓库内的本地改动，冷启动时 EC 的 UCSI PPM 可能长时间半响应，注册失败后按 5s×10 次、再 30s/60s 退避重试约 30 分钟，避免 Type-C 在本次启动内永久不可用
+- `others/0008`、`others/0009`：Pengyu Luo 投给上游的补丁，让触屏 QUP-SPI 支持 `qcom,force-gsi-mode`（走 GSI/DMA 而非逐字 FIFO；DTS 里已写该属性但 v7.2.5 驱动不读），经 [aoripus/easy-for-gaokun](https://github.com/aoripus/easy-for-gaokun) 携带；[邮件列表原文](https://lore.kernel.org/linux-arm-msm/20260614083424.464132-1-mitltlatltl@gmail.com)
+- `others/0010`：来自 [aoripus/easy-for-gaokun](https://github.com/aoripus/easy-for-gaokun)，为 msm DRM 驱动暴露 GPU 利用率/显存/时钟/温度遥测节点，供系统监视器读取
 - `media/*`：来自 [jhovold/linux](https://github.com/jhovold/linux/commits/wip/sc8280xp-6.16), 为高通 SC8280XP 平台 添加 Venus 视频编解码驱动支持
 - `0099`：本仓库内的本地补丁，用于导入当前的 DTS 文件和 `gaokun3_defconfig`
+- `0100`：来自 [aoripus/easy-for-gaokun](https://github.com/aoripus/easy-for-gaokun)，Himax HX83121A 级联 IC 的主机接口由 TLMM gpio174 电平选择，引导固件把它留在高电平（I2C-HID 模式、SPI 通路静默）；补丁在板级 DTS 中将其描述为低电平输出，使 IC 在触控固件重载前锁存 SPI 模式。**必须在 `0099` 之后应用**（见 `scripts/ci/20_build_kernel_variants.sh`）
 - **[可选]** `el2/*`：来自 [TravMurav/linux](https://github.com/TravMurav/linux/tree/x13s-6.18-v1.1-cxsd)，用于补齐 EL2 启动路径中的 SMP2P 接管、remoteproc attach/restart 流程、SCM/SHM owner 处理，以及 rpmsg / QRTR / pmic_glink 相关稳定性修复
 
 ### Tools 来源
@@ -55,6 +58,7 @@
 - `tools/el2/qebspilaa64.efi`：来自 [stephan-gh/qebspil](https://github.com/stephan-gh/qebspil)
 - `tools/el2/slbounceaa64.efi`：来自 [TravMurav/slbounce](https://github.com/TravMurav/slbounce)
 - `tools/touchscreen-tuner`：来自 [chiyuki0325/EGoTouchRev-Linux](https://github.com/chiyuki0325/EGoTouchRev-Linux)，本仓库对其做了 GTK4 GUI 改进
+- `tools/touch-bench/gk-touch-bench.py`：来自 [aoripus/easy-for-gaokun](https://github.com/aoripus/easy-for-gaokun)，触屏通路量化基准（报点率/帧间隔/IRQ 效率）
 
 ## 启动产物布局
 
@@ -70,6 +74,7 @@
 ## 快速开始
 
 - Release：<https://github.com/KawaiiHachimi/linux-gaokun-build/releases>
+- 平台说明（机型鉴别与能力边界）：[中文](platform_notes_zh.md) | [English](platform_notes_en.md)
 - 双系统引导指南：[English](dual_boot_guide_en.md) | [中文](dual_boot_guide_zh.md)
 - EL2 实现说明：[English](el2_kvm_guide_en.md) | [中文](el2_kvm_guide_zh.md)
 - Awesome Gaokun3：：[English](awesome_gaokun3_en.md) | [中文](awesome_gaokun3_zh.md)
@@ -92,3 +97,4 @@
 - [TravMurav/slbounce](https://github.com/TravMurav/slbounce)：在 Gaokun3 上启用 EL2 支持和安全启动的 UEFI 应用程序。
 - [TravMurav/linux](https://github.com/TravMurav/linux/tree/x13s-6.18-v1.1-cxsd)：包含一些 sc8280xp 平台 EL2 支持补丁的 Linux 内核树。
 - [stephan-gh/qebspil](https://github.com/stephan-gh/qebspil)：在高通平台上预启动 DSP 固件的 UEFI 应用程序，可在引导链中用于启动 Linux 之前。
+- [aoripus/easy-for-gaokun](https://github.com/aoripus/easy-for-gaokun)：面向 MateBook E Go 2022 性能版（GK-W76）的深度适配仓库，以本项目的镜像为基线；触屏接口模式修复、SPI GSI 补丁、GPU 遥测补丁、音频/指纹/视频硬解取证均来自该仓库。
