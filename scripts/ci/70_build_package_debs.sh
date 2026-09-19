@@ -27,6 +27,8 @@ BUILDROOT_DIR="$WORKDIR/package-buildroots"
 DEB_ARCH="arm64"
 FIRMWARE_DEB_VERSION="${FIRMWARE_DEB_VERSION:-$(date -u +%Y%m%d)-1}"
 BUILD_TIME_UTC="$(date -u +"%Y-%m-%dT%H:%M:%SZ")"
+# 记录构建用的源码 commit: release 工作流用它校验"复用的包是否与本次镜像同源"
+COMMIT_SHA="${COMMIT_SHA:-$(git -C "$GAOKUN_DIR" rev-parse HEAD 2>/dev/null || echo unknown)}"
 
 mkdir -p "$ARTIFACT_DIR" "$DEB_TOPDIR"
 
@@ -292,6 +294,7 @@ cat >"$ARTIFACT_DIR/package-manifest.json" <<EOF
 {
   "package_release_tag": "${PACKAGE_RELEASE_TAG}",
   "kernel_tag": "${KERNEL_TAG}",
+  "commit_sha": "${COMMIT_SHA}",
   "build_el2": ${BUILD_EL2},
   "built_at_utc": "${BUILD_TIME_UTC}",
   "firmware_version": "${FIRMWARE_DEB_VERSION}",

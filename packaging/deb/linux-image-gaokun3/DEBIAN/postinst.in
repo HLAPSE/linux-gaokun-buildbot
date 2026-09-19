@@ -34,4 +34,17 @@ if command -v kernel-install >/dev/null 2>&1 &&
   kernel-install --entry-token=machine-id remove @KREL@ || true
   kernel-install --verbose --make-entry-directory=yes --entry-token=machine-id add \
     @KREL@ /boot/vmlinuz-@KREL@ /boot/initrd.img-@KREL@
+
+  # 清理历史装机/升级残留的坏条目: 引用的内核文件已不在 ESP 上的条目一律删除,
+  # 避免 systemd-boot 的 default 落到坏条目上(bootctl 会告 default entry is broken)
+  for esp in /boot/efi /efi; do
+    mountpoint -q "$esp" || continue
+    for conf in "$esp"/loader/entries/*.conf; do
+      [ -e "$conf" ] || continue
+      linux_path="$(sed -n 's/^linux[[:space:]]*//p' "$conf")"
+      if [ -n "$linux_path" ] && [ ! -e "$esp$linux_path" ]; then
+        rm -f "$conf"
+      fi
+    done
+  done
 fi

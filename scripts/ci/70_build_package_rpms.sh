@@ -29,6 +29,8 @@ RPM_PAYLOAD_LEVEL="${RPM_PAYLOAD_LEVEL:-2}"
 RPM_PAYLOAD_MACRO="w${RPM_PAYLOAD_LEVEL}T${RPM_BUILD_JOBS}.xzdio"
 FIRMWARE_RPM_VERSION="${FIRMWARE_RPM_VERSION:-$(date -u +%Y%m%d)}"
 BUILD_TIME_UTC="$(date -u +"%Y-%m-%dT%H:%M:%SZ")"
+# 记录构建用的源码 commit 与目标发行版: release 工作流用它校验"复用的包是否与本次镜像同源"
+COMMIT_SHA="${COMMIT_SHA:-$(git -C "$GAOKUN_DIR" rev-parse HEAD 2>/dev/null || echo unknown)}"
 
 mkdir -p \
   "$ARTIFACT_DIR" \
@@ -70,7 +72,9 @@ build_variant_rpms() {
   local kernel_pkg="kernel-gaokun3${pkg_suffix}"
   local modules_pkg="kernel-modules-gaokun3${pkg_suffix}"
   local devel_pkg="kernel-devel-gaokun3${pkg_suffix}"
-  local krel_version="${krel//-/_}"
+  # 用 ~ 保证预发布排序正确: 7.3.0~rc2 < 7.3.0。用 "_" 会把 rc 内核排在正式版之上,
+  # 导致 Fedora 上 rc 装完无法升级到正式版(与 deb 侧 ${krel//-/\~} 对齐)
+  local krel_version="${krel//-/\~}"
   local dracut_conf="90-gaokun3-${krel}.conf"
   local kernel_stage="$BUILDROOT_DIR/${kernel_pkg}"
   local modules_stage="$BUILDROOT_DIR/${modules_pkg}"
@@ -97,7 +101,7 @@ build_variant_rpms() {
   cat > "$kernel_stage/usr/lib/dracut/dracut.conf.d/$dracut_conf" <<'EOF'
 hostonly="no"
 add_drivers+=" btrfs nvme phy-qcom-qmp-pcie phy-qcom-qmp-combo phy-qcom-qmp-usb phy-qcom-snps-femto-v2 usb-storage uas typec pci-pwrctrl-pwrseq ath11k ath11k_pci i2c-hid-of lpasscc_sc8280xp snd-soc-sc8280xp pinctrl_sc8280xp_lpass_lpi "
-install_items+=" /lib/firmware/qcom/sc8280xp/HUAWEI/gaokun3/qcslpi8280.mbn /lib/firmware/qcom/sc8280xp/HUAWEI/gaokun3/qcadsp8280.mbn /lib/firmware/qcom/sc8280xp/HUAWEI/gaokun3/qccdsp8280.mbn /lib/firmware/qcom/sc8280xp/SC8280XP-HUAWEI-GAOKUN3-tplg.bin /lib/firmware/qcom/sc8280xp/HUAWEI/gaokun3/audioreach-tplg.bin "
+install_items+=" /lib/firmware/qcom/sc8280xp/HUAWEI/gaokun3/qcslpi8280.mbn /lib/firmware/qcom/sc8280xp/HUAWEI/gaokun3/qcadsp8280.mbn /lib/firmware/qcom/sc8280xp/HUAWEI/gaokun3/qccdsp8280.mbn /lib/firmware/qcom/sc8280xp/SC8280XP-HUAWEI-GAOKUN3-tplg.bin /lib/firmware/qcom/sc8280xp/HUAWEI/gaokun3/audioreach-tplg.bin /lib/firmware/qcom/a660_sqe.fw /lib/firmware/qcom/a660_gmu.bin "
 EOF
 
   make -C "$src_dir" O="$out_dir" ARCH=arm64 INSTALL_MOD_PATH="$modules_raw_stage" modules_install
@@ -251,6 +255,8 @@ cat >"$ARTIFACT_DIR/package-manifest.json" <<EOF
 {
   "package_release_tag": "${PACKAGE_RELEASE_TAG}",
   "kernel_tag": "${KERNEL_TAG}",
+  "commit_sha": "${COMMIT_SHA}",
+  "fedora_release": "${FEDORA_RELEASE:-44}",
   "build_el2": ${BUILD_EL2},
   "built_at_utc": "${BUILD_TIME_UTC}",
   "firmware_version": "${FIRMWARE_RPM_VERSION}",

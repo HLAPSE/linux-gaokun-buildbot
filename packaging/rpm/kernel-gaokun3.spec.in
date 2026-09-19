@@ -52,11 +52,33 @@ if [ "$1" -ge 1 ] && command -v dracut >/dev/null 2>&1 && command -v kernel-inst
            /boot/efi/*/0-rescue \
            /boot/efi/loader/entries/*-0-rescue.conf >/dev/null 2>&1 || :
 
-    dracut --force --kver @KREL@ >/dev/null 2>&1 || :
-    kernel-install --entry-token=machine-id remove @KREL@ >/dev/null 2>&1 || :
+    # 与 deb 侧 postinst 相同的失败语义: 静默生成残缺 initrd / 缺失 BLS 条目会让
+    # dnf 显示成功、重启才进不了系统。scriptlet 失败必须显式可见。
+    # 不先 remove 再 add —— kernel-install add 对既有条目是幂等覆盖, 预先 remove
+    # 会把 "add 失败" 变成 "该内核启动项彻底消失"。
+    dracut --force --kver @KREL@ || {
+        echo "ERROR: failed to generate initramfs for @KREL@" >&2
+        exit 1
+    }
     KERNEL_INSTALL_CONF_ROOT="$temp_conf_root" \
         kernel-install --make-entry-directory=yes --entry-token=machine-id add \
-        @KREL@ /boot/vmlinuz-@KREL@ >/dev/null 2>&1 || :
+        @KREL@ /boot/vmlinuz-@KREL@ || {
+        echo "ERROR: failed to register BLS entry for @KREL@" >&2
+        exit 1
+    }
+
+    # 清理历史装机/升级残留的坏条目: 引用的内核文件已不在 ESP 上的条目一律删除,
+    # 避免 systemd-boot 的 default 落到坏条目上(bootctl 会告 default entry is broken)
+    for esp in /boot/efi /efi; do
+        mountpoint -q "$esp" || continue
+        for conf in "$esp"/loader/entries/*.conf; do
+            [ -e "$conf" ] || continue
+            linux_path="$(sed -n 's/^linux[[:space:]]*//p' "$conf")"
+            if [ -n "$linux_path" ] && [ ! -e "$esp$linux_path" ]; then
+                rm -f "$conf"
+            fi
+        done
+    done
 fi
 
 %preun
