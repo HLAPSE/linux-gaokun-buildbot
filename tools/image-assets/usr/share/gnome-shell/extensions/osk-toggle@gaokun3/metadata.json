@@ -1,0 +1,7 @@
+{
+    "uuid": "osk-toggle@gaokun3",
+    "name": "虚拟键盘开关 (OSK Toggle)",
+    "description": "在快捷设置(WiFi/蓝牙所在面板)添加虚拟键盘一级开关, 双向同步 screen-keyboard-enabled。为 MateBook E Go 等键盘可拆的二合一设备设计。",
+    "shell-version": ["49", "50"],
+    "url": "https://github.com/HLAPSE/linux-gaokun-buildbot"
+}

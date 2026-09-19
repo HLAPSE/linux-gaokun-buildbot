@@ -1,0 +1,14 @@
+[Unit]
+Description=Enable OSK quick-settings toggle extension
+# 每次登录兜底: Ubuntu 的会话栈可能把 org.gnome.shell enabled-extensions
+# 重写为厂商默认列表, 幂等地把我们的开关加回去。
+# 注意不能用 exec: enable 失败时需要走 || exit 0, exec 替换进程后它不可达
+After=graphical-session.target
+PartOf=graphical-session.target
+
+[Service]
+Type=oneshot
+ExecStart=/bin/sh -c 'command -v gnome-extensions >/dev/null 2>&1 && gnome-extensions enable osk-toggle@gaokun3; exit 0'
+
+[Install]
+WantedBy=graphical-session.target

@@ -26,6 +26,11 @@ install_common_image_assets() {
     "tools/image-assets/etc/systemd/zram-generator.conf:/etc/systemd/zram-generator.conf"
     "tools/image-assets/etc/systemd/journald.conf.d/90-gaokun.conf:/etc/systemd/journald.conf.d/90-gaokun.conf"
     "tools/installer/gaokun-install.desktop:/usr/share/applications/gaokun-install.desktop"
+    # 快捷设置里的虚拟键盘开关(GNOME Shell 扩展, 供键盘可拆的二合一场景)
+    "tools/image-assets/usr/share/gnome-shell/extensions/osk-toggle@gaokun3/metadata.json:/usr/share/gnome-shell/extensions/osk-toggle@gaokun3/metadata.json"
+    "tools/image-assets/usr/share/gnome-shell/extensions/osk-toggle@gaokun3/extension.js:/usr/share/gnome-shell/extensions/osk-toggle@gaokun3/extension.js"
+    # user 级 systemd 服务: 每次登录幂等地确保扩展处于启用状态
+    "tools/image-assets/usr/lib/systemd/user/gaokun-osk-toggle-enable.service:/usr/lib/systemd/user/gaokun-osk-toggle-enable.service"
   )
   local asset src dest
 

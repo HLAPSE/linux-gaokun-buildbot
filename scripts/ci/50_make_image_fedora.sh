@@ -142,6 +142,8 @@ EOF
 systemctl enable gdm NetworkManager \
   gdm-monitor-sync.service gaokun-grow-rootfs.service \
   patch-nvm-bdaddr.service || true
+# user 级: 每次登录确保虚拟键盘快捷开关扩展启用(--global 只写符号链接, chroot 内可用)
+systemctl --global enable gaokun-osk-toggle-enable.service || true
 
 # 平板桌面场景没有需要等网络的本机服务/mount，wait-online 在 Wi-Fi 下白等 7s+，禁用之
 systemctl disable NetworkManager-wait-online.service || true
