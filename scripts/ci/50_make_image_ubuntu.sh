@@ -60,7 +60,7 @@ install_common_image_assets "$MNT" "$GAOKUN_DIR"
 
 sudo tee "$MNT/etc/fstab" >/dev/null <<EOF
 UUID=${ROOT_UUID}  /         ext4   errors=remount-ro,noatime  0  1
-UUID=${EFI_UUID}   /boot/efi vfat   defaults,nofail,x-systemd.device-timeout=10s  0  2
+UUID=${EFI_UUID}   /boot/efi vfat   fmask=0077,dmask=0077,nofail,x-systemd.device-timeout=10s  0  2
 EOF
 
 sudo mount --bind /dev "$MNT/dev"
@@ -115,9 +115,14 @@ dconf compile /home/user/.config/dconf/user "$_user_kf_dir"
 rm -rf "$_user_kf_dir"
 
 # 预置「已完成初始设置」标记，跳过首次登录的 gnome-initial-setup：
-# marker 路径对应 gnome-initial-setup-first-login.service 的
-# ConditionPathExists=!%E/gnome-initial-setup-done（%E 即 ~/.config）
+#   - gnome-initial-setup-first-login.service：ConditionPathExists=!%E/gnome-initial-setup-done
+#   - gnome-initial-setup-upgrade-login.service：条件与此相反——要求 done 标记存在、
+#     且 %E/gnome-initial-setup/upgrade-<release>-done 不存在。只建 done 标记反而会
+#     触发它：--upgrade-user 模式的键盘页会按 zh_CN locale 再追加一份智能拼音
+#     （线上复现过：输入源出现两个智能拼音），必须把 upgrade 标记一并预置
 install -D -m 0644 /dev/null /home/user/.config/gnome-initial-setup-done
+install -d -m 0755 /home/user/.config/gnome-initial-setup
+install -D -m 0644 /dev/null "/home/user/.config/gnome-initial-setup/upgrade-${UBUNTU_RELEASE}-done"
 
 chown -R user:user /home/user
 
@@ -145,7 +150,9 @@ ExecStart=/bin/sh -c 'mkdir -p /tmp/.X11-unix && chown root:root /tmp/.X11-unix 
 WantedBy=graphical.target
 EOF
 
-systemctl enable gdm NetworkManager ssh \
+# ssh 默认不启用: 公开口令 + 免密 sudo 的组合不该默认暴露在网络上, 需要时手动开启
+# (sudo systemctl enable --now ssh)
+systemctl enable gdm NetworkManager \
   gaokun-fix-x11-unix.service gdm-monitor-sync.service \
   gaokun-grow-rootfs.service patch-nvm-bdaddr.service || true
 
@@ -251,9 +258,11 @@ if [[ "$BUILD_EL2" == "true" && -n "$KREL_EL2" ]]; then
 fi
 
 cat > /boot/efi/loader/loader.conf <<EOF
-# 通配所有 standard gaokun3 条目（不含 -gaokun3-el2）：systemd-boot 对多匹配按版本排序，
-# 自动选择最高版本，设备上 dpkg 升级新内核后无需再手工改 default
-default *-gaokun3.conf
+# 通配所有 standard gaokun3 条目（不含 -gaokun3-el2）：注意 krel 以 "gaokun3+" 结尾，
+# 通配符必须带上 "+"（*-gaokun3.conf 一个条目都匹配不上，systemd-boot 会退回按文件名
+# 排序选中可能是坏条目的第一项）；systemd-boot 对多匹配按版本排序，自动选择最高版本，
+# 设备上 dpkg 升级新内核后无需再手工改 default
+default *-gaokun3+.conf
 timeout 5
 console-mode keep
 editor no

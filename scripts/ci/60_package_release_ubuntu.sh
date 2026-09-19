@@ -74,6 +74,8 @@ else
   split -b "$IMAGE_CHUNK_SIZE" -d -a 3 \
     "$ZST_FILE" \
     "$ZST_FILE.part-"
+  # 分卷已就位, 删掉原始 zst(2-4G): ARM runner 磁盘紧张, 只增不收会 ENOSPC
+  rm -f "$ZST_FILE"
   PACKAGE_GLOB="${IMAGE_BASENAME}.zst.part-*"
 
   cat >> "$RELEASE_BODY_FILE" <<EOF

@@ -44,6 +44,8 @@ jobs:
     outputs:
       package_release_tag: ${{ steps.release_meta.outputs.package_release_tag }}
     runs-on: ubuntu-24.04-arm
+    # 内核全量编译 1-2 小时, 显式超时避免挂死占满 6 小时默认额度
+    timeout-minutes: 240
     env:
       TZ: UTC
       KERNEL_TAG: ${{ inputs.kernel_tag || github.event.inputs.kernel_tag }}
@@ -59,7 +61,7 @@ jobs:
 
     steps:
       - name: Checkout
-        uses: actions/checkout@v7
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
 
       - name: Install host dependencies
         run: |
@@ -105,7 +107,7 @@ jobs:
           echo "PACKAGE_RELEASE_TAG=$package_release_tag" >> "$GITHUB_ENV"
 
       - name: Restore ccache
-        uses: actions/cache@v6
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6
         with:
           path: ~/.ccache
           key: gaokun3-packages-deb-ccache-${{ env.KERNEL_TAG }}-${{ env.BUILD_EL2 }}-${{ hashFiles('patches/**/*.patch', 'defconfig/**', 'dts/**', 'drivers/**', 'packaging/**', 'firmware/**', 'scripts/ci/*.sh', '.github/workflows/gaokun3-package-debs.yml') }}
@@ -137,7 +139,7 @@ jobs:
           df -h /
 
       - name: Upload build artifacts (workflow)
-        uses: actions/upload-artifact@v7
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
         with:
           name: gaokun3-package-debs
           compression-level: 0 # DEB 内部已是 xz/zstd 压缩数据，跳过 zip 二次压缩省临时盘与时间
@@ -147,7 +149,8 @@ jobs:
             ${{ env.ARTIFACT_DIR }}/package-release-body.md
 
       - name: Publish package release
-        uses: softprops/action-gh-release@v3
+        # 固定到 v3 的具体 commit: 该 action 持有 contents:write, 不用可变标签
+        uses: softprops/action-gh-release@5113cdc90fd4d541c801c55356214017bf5ae34b # v3
         with:
           tag_name: ${{ env.PACKAGE_RELEASE_TAG }}
           name: gaokun3 package DEBs - ${{ env.KERNEL_TAG }}${{ env.BUILD_EL2 == 'true' && ' + EL2' || '' }}

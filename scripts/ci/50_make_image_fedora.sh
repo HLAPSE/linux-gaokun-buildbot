@@ -65,7 +65,8 @@ sudo mount "${LOOP}p1" "$MNT/boot/efi"
 # 不能用 --chown=root:root：它会把所有文件的属组刷成 root，破坏 wheel/shadow/dbus 等
 # 非 root 属组。只需在 rsync 后单独把镜像根目录属主改回 root
 # （CI 里 ROOTFS_DIR 顶层目录属于 runner 用户）。
-sudo rsync -aHAX "$ROOTFS_DIR/" "$MNT/"
+# --exclude 与 Ubuntu 镜像一致：ROOTFS_DIR 内的挂载点若残留宿主内容，不能拷进镜像。
+sudo rsync -aHAX --exclude='/proc/*' --exclude='/sys/*' --exclude='/dev/*' --exclude='/run/*' "$ROOTFS_DIR/" "$MNT/"
 sudo chown root:root "$MNT"
 install_common_image_assets "$MNT" "$GAOKUN_DIR"
 
@@ -73,7 +74,7 @@ sudo tee "$MNT/etc/fstab" >/dev/null <<EOF
 UUID=${ROOT_UUID}  /         btrfs  subvol=@,compress=zstd:1,ssd,noatime  0  0
 UUID=${ROOT_UUID}  /home     btrfs  subvol=@home,compress=zstd:1,ssd,noatime  0  0
 UUID=${ROOT_UUID}  /var      btrfs  subvol=@var,compress=zstd:1,ssd,noatime  0  0
-UUID=${EFI_UUID}   /boot/efi vfat   defaults,nofail,x-systemd.device-timeout=10s  0  2
+UUID=${EFI_UUID}   /boot/efi vfat   fmask=0077,dmask=0077,nofail,x-systemd.device-timeout=10s  0  2
 EOF
 
 sudo mount --bind /dev "$MNT/dev"
@@ -82,7 +83,7 @@ sudo mount -t proc proc "$MNT/proc"
 sudo mount -t sysfs sys "$MNT/sys"
 sudo mount -t tmpfs tmpfs "$MNT/run"
 
-sudo chroot "$MNT" /usr/bin/env KREL="$KREL" KREL_EL2="$KREL_EL2" BUILD_EL2="$BUILD_EL2" ROOT_UUID="$ROOT_UUID" /bin/bash -euxo pipefail <<'CHROOT_EOF'
+sudo chroot "$MNT" /usr/bin/env KREL="$KREL" KREL_EL2="$KREL_EL2" BUILD_EL2="$BUILD_EL2" ROOT_UUID="$ROOT_UUID" FEDORA_RELEASE="$FEDORA_RELEASE" /bin/bash -euxo pipefail <<'CHROOT_EOF'
 echo "fedora" > /etc/hostname
 id -u user >/dev/null 2>&1 || useradd -m -s /bin/bash -G wheel user
 echo "user:user" | chpasswd
@@ -107,17 +108,38 @@ EOF
 
 install -d -m 0755 /home/user/.config
 install -Dm644 /usr/local/share/gaokun/monitors.xml /home/user/.config/monitors.xml
+
+# 预置 user 级输入源（与系统级 dconf 默认一致，与 Ubuntu 镜像对齐）：
+# 不预置的话，首登的 gnome-initial-setup 键盘页会按 zh_CN locale 再追加一份智能拼音
+_user_kf_dir=$(mktemp -d)
+cat > "$_user_kf_dir/00-input-sources" <<'INPUT_SOURCES_EOF'
+[org/gnome/desktop/input-sources]
+current=uint32 0
+sources=[('xkb', 'us'), ('ibus', 'libpinyin')]
+xkb-options=@as []
+INPUT_SOURCES_EOF
+install -d -m 0755 /home/user/.config/dconf
+dconf compile /home/user/.config/dconf/user "$_user_kf_dir"
+rm -rf "$_user_kf_dir"
+
+# 预置「已完成初始设置」标记，跳过首登的 gnome-initial-setup（向导 + 键盘页追加输入源）。
+# 与 Ubuntu 镜像同理：done 标记会触发 upgrade 变体，upgrade 标记必须一并预置
+install -D -m 0644 /dev/null /home/user/.config/gnome-initial-setup-done
+install -d -m 0755 /home/user/.config/gnome-initial-setup
+install -D -m 0644 /dev/null "/home/user/.config/gnome-initial-setup/upgrade-${FEDORA_RELEASE}-done"
 chown -R user:user /home/user
 
-# GDM 自动登录：平板形态 + 补丁测试场景（触屏失效时无需键盘输密码）
-# 如需关闭，注释掉下面两行 AutomaticLogin 即可
+# GDM 登录默认要求密码验证（与 Ubuntu 镜像一致的安全默认）。
+# 如需平板形态/补丁测试场景免密登录，取消注释下面两行 AutomaticLogin 即可
 cat > /etc/gdm/custom.conf <<'EOF'
 [daemon]
-AutomaticLoginEnable=True
-AutomaticLogin=user
+#AutomaticLoginEnable=True
+#AutomaticLogin=user
 EOF
 
-systemctl enable gdm NetworkManager sshd \
+# sshd 默认不启用: 公开口令 + 免密 sudo 的组合不该默认暴露在网络上, 需要时手动开启
+# (sudo systemctl enable --now sshd)
+systemctl enable gdm NetworkManager \
   gdm-monitor-sync.service gaokun-grow-rootfs.service \
   patch-nvm-bdaddr.service || true
 
@@ -142,6 +164,8 @@ ln -sf /usr/share/zoneinfo/Asia/Shanghai /etc/localtime
 cat > /etc/dracut.conf.d/matebook.conf <<'MODEOF'
 hostonly="no"
 add_drivers+=" btrfs nvme phy-qcom-qmp-pcie phy-qcom-qmp-combo phy-qcom-qmp-usb phy-qcom-snps-femto-v2 usb-storage uas typec pci-pwrctrl-pwrseq ath11k ath11k_pci i2c-hid-of "
+# GPU 固件进 initramfs: 否则 msm 探测早期报 a660_sqe.fw 加载失败(rootfs 尚未就绪的竞态)
+install_items+=" /lib/firmware/qcom/a660_sqe.fw /lib/firmware/qcom/a660_gmu.bin "
 MODEOF
 
 install -d /etc/kernel
@@ -159,12 +183,11 @@ ln -sf /dev/null /etc/kernel/install.d/51-dracut-rescue.install
 #   pcie_aspm 链路省电; efi=noruntime 禁用不稳定的 UEFI RT; fbcon=rotate:1 竖屏 TTY;
 #   usbhid.quirks 0x20000000 = NO_INIT_REPORTS; 其余为控制台/日志设置
 cat > /etc/kernel/cmdline <<EOF
-root=UUID=$ROOT_UUID rootflags=subvol=@ clk_ignore_unused pd_ignore_unused arm64.nopauth iommu.passthrough=0 iommu.strict=0 pcie_aspm.policy=powersupersave efi=noruntime fbcon=rotate:1 usbcore.autosuspend=-1 usbhid.quirks=0x12d1:0x10b8:0x20000000 consoleblank=0 loglevel=4 psi=1
+root=UUID=$ROOT_UUID rootflags=subvol=@ clk_ignore_unused pd_ignore_unused arm64.nopauth iommu.passthrough=0 iommu.strict=0 pcie_aspm.policy=powersupersave modprobe.blacklist=simpledrm efi=noruntime fbcon=rotate:1 usbcore.autosuspend=-1 usbhid.quirks=0x12d1:0x10b8:0x20000000 consoleblank=0 loglevel=4 psi=1
 EOF
 
 rm -f /etc/machine-id
 systemd-machine-id-setup
-MACHINE_ID="$(cat /etc/machine-id)"
 
 bootctl --no-variables --esp-path=/boot/efi install
 
@@ -197,7 +220,9 @@ if [[ "$BUILD_EL2" == "true" && -n "$KREL_EL2" ]]; then
 fi
 
 cat > /boot/efi/loader/loader.conf <<EOF
-default ${MACHINE_ID}-${KREL}.conf
+# 与 Ubuntu 镜像一致：通配所有 standard gaokun3 条目（不含 -gaokun3-el2，需带 "+" 才能匹配），
+# 按版本排序自动选择最高版本，设备上 dnf 升级新内核后无需再手工改 default
+default *-gaokun3+.conf
 timeout 5
 console-mode keep
 editor no

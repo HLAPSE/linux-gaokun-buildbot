@@ -51,12 +51,15 @@ jobs:
     with:
       kernel_tag: ${{ github.event.inputs.kernel_tag }}
       build_el2: ${{ github.event.inputs.build_el2 == 'true' }}
-    secrets: inherit
+    # 不用 secrets: inherit: 被调工作流只需要自动提供的 GITHUB_TOKEN,
+    # inherit 会把仓库全部 secret 暴露进其执行环境
 
   build-and-release:
     needs: build-package-debs
     if: ${{ !cancelled() && (needs.build-package-debs.result == 'success' || needs.build-package-debs.result == 'skipped') }}
     runs-on: ubuntu-24.04-arm
+    # rootfs 下载解包 + 桌面安装 + 镜像打包, 常规 1 小时内; 显式超时防挂死占满 6 小时
+    timeout-minutes: 240
     env:
       TZ: UTC
       UBUNTU_RELEASE: ${{ github.event.inputs.ubuntu_release }}
@@ -76,7 +79,7 @@ jobs:
 
     steps:
       - name: Checkout
-        uses: actions/checkout@v7
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
 
       - name: Install host dependencies
         run: |
@@ -102,20 +105,30 @@ jobs:
               "$@"
           }
 
-          # 按附件名从 release JSON 解析下载地址并下载，缺失即失败
+          # 按附件名从 release JSON 解析下载地址并下载，缺失即失败。
+          # 两段式下载: API 会 302 到 objects.githubusercontent.com, 先取带签名的
+          # 重定向地址再不带 Authorization 下载, 避免 token 被重放到 GitHub 之外的主机
           download_asset() {
             local name="$1"
             local out="$2"
-            local url
+            local url redirect_url
             url="$(jq -r --arg name "$name" '.assets[] | select(.name == $name) | .url' "$release_json")"
             if [[ -z "$url" || "$url" == "null" ]]; then
               echo "missing asset ${name} in release ${PACKAGE_RELEASE_TAG}" >&2
               exit 1
             fi
-            curl -fsSL \
+            redirect_url="$(curl -fsSI -o /dev/null -w '%{redirect_url}' \
               -H "Authorization: Bearer ${GITHUB_TOKEN}" \
               -H "Accept: application/octet-stream" \
-              "$url" -o "$out"
+              "$url")"
+            if [[ -n "$redirect_url" && "$redirect_url" != "null" ]]; then
+              curl -fsSL "$redirect_url" -o "$out"
+            else
+              curl -fsSL \
+                -H "Authorization: Bearer ${GITHUB_TOKEN}" \
+                -H "Accept: application/octet-stream" \
+                "$url" -o "$out"
+            fi
           }
 
           if [[ "${{ github.event.inputs.rebuild_package_debs }}" != "true" ]]; then
@@ -127,9 +140,14 @@ jobs:
             prefix="gaokun3-debs-${safe_kernel_tag}-${profile}-"
 
             releases_json="$WORKDIR/releases.json"
-            api "https://api.github.com/repos/${GITHUB_REPOSITORY}/releases?per_page=100" -o "$releases_json"
-
-            PACKAGE_RELEASE_TAG="$(jq -r --arg prefix "$prefix" '.[] | select(.tag_name | startswith($prefix)) | .tag_name' "$releases_json" | head -n 1)"
+            # 分页检索: 每次构建都新增带时间戳的包发布, 固定取前 100 条会漏掉旧 tag
+            PACKAGE_RELEASE_TAG=""
+            for page in 1 2 3; do
+              api "https://api.github.com/repos/${GITHUB_REPOSITORY}/releases?per_page=100&page=$page" -o "$releases_json"
+              PACKAGE_RELEASE_TAG="$(jq -r --arg prefix "$prefix" '.[] | select(.tag_name | startswith($prefix)) | .tag_name' "$releases_json" | head -n 1)"
+              [[ -n "$PACKAGE_RELEASE_TAG" ]] && break
+              (( $(jq length "$releases_json") < 100 )) && break
+            done
             if [[ -z "$PACKAGE_RELEASE_TAG" ]]; then
               echo "no package release found for prefix ${prefix}" >&2
               exit 1
@@ -148,6 +166,14 @@ jobs:
           manifest_kernel_tag="$(jq -r '.kernel_tag' "$manifest_path")"
           if [[ "$manifest_kernel_tag" != "$KERNEL_TAG" ]]; then
             echo "package release kernel tag mismatch: expected ${KERNEL_TAG}, got ${manifest_kernel_tag}" >&2
+            exit 1
+          fi
+          # 同源校验: kernel.release 字符串不变不代表包没变(patches/firmware 都可能改过),
+          # 复用的包必须与本次镜像同一 commit 构建
+          manifest_commit="$(jq -r '.commit_sha // empty' "$manifest_path")"
+          if [[ -n "$manifest_commit" && "$manifest_commit" != "unknown" && "$manifest_commit" != "$GITHUB_SHA" ]]; then
+            echo "package release was built from commit ${manifest_commit}, but this run is ${GITHUB_SHA}" >&2
+            echo "stale packages may silently differ (patches/firmware changed); rerun with rebuild_package_debs=true" >&2
             exit 1
           fi
           if [[ "$BUILD_EL2" == "true" && "$(jq -r '.build_el2' "$manifest_path")" != "true" ]]; then
@@ -239,11 +265,13 @@ jobs:
               apt-get install -y --no-install-recommends systemd-boot systemd-boot-efi
 
               # Base system tools (not user-configurable)
+              # cloud-guest-utils 提供 growpart: gaokun-install / gaokun-grow-rootfs 依赖它,
+              # 放进基础包而不是可选 extra_packages, 避免用户自定义包列表时装机扩容静默失效
               apt-get install -y \
                 iputils-ping iproute2 net-tools dnsutils traceroute \
                 xz-utils unzip zip bzip2 zstd p7zip-full \
                 wget curl ca-certificates gnupg lsb-release \
-                ssh less file sudo
+                ssh less file sudo cloud-guest-utils
 
               # dconf-cli: required by the image configuration step (dconf update writes screen-keyboard defaults)
               apt-get install -y dconf-cli
@@ -301,6 +329,16 @@ jobs:
           sudo mount -t proc proc "$ROOTFS_DIR/proc"
           sudo mount -t sysfs sys "$ROOTFS_DIR/sys"
           sudo mount -t tmpfs tmpfs "$ROOTFS_DIR/run"
+          # 与 Bootstrap 步骤相同: 失败也要保证挂载被清理, 单条 umount 失败不能杀死整单
+          deb_mount_cleanup() {
+            set +e
+            sudo umount "$ROOTFS_DIR/dev/pts" 2>/dev/null || true
+            sudo umount "$ROOTFS_DIR/dev" 2>/dev/null || true
+            sudo umount "$ROOTFS_DIR/proc" 2>/dev/null || true
+            sudo umount "$ROOTFS_DIR/sys" 2>/dev/null || true
+            sudo umount "$ROOTFS_DIR/run" 2>/dev/null || true
+          }
+          trap deb_mount_cleanup EXIT
 
           # DEB 文件名不含空白，容器内靠分词展开
           chroot_debs="$(printf ' /tmp/%s' "${deb_names[@]}")"
@@ -315,7 +353,8 @@ jobs:
               done
             '
 
-          sudo umount "$ROOTFS_DIR/dev/pts" "$ROOTFS_DIR/dev" "$ROOTFS_DIR/proc" "$ROOTFS_DIR/sys" "$ROOTFS_DIR/run"
+          deb_mount_cleanup
+          trap - EXIT
 
       - name: Slim rootfs (remove caches, logs, docs before imaging)
         run: |
@@ -346,20 +385,29 @@ jobs:
       - name: Create disk image and configure boot
         run: scripts/ci/50_make_image_ubuntu.sh
 
+      # 镜像 rootfs 分区已写完, 后续打包只读 IMAGE_FILE; rootfs(7-8G)继续留着会推高
+      # 峰值占用, ARM runner 磁盘紧张(package 工作流已踩过 ENOSPC)
+      - name: Free disk space before packaging
+        run: |
+          set -euxo pipefail
+          sudo rm -rf "$ROOTFS_DIR"
+          df -h /
+
       # 输出 tag_name / kernel_release / package_glob 到 GITHUB_OUTPUT
       - name: Package image and generate release info
         id: package
         run: scripts/ci/60_package_release_ubuntu.sh
 
       - name: Upload build artifacts (workflow)
-        uses: actions/upload-artifact@v7
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
         with:
           name: ubuntu-gaokun3-build
           compression-level: 0 # .zst 已是压缩数据，跳过 zip 打包的重复压缩
           path: ${{ env.ARTIFACT_DIR }}/${{ steps.package.outputs.package_glob }}
 
       - name: Create GitHub Release
-        uses: softprops/action-gh-release@v3
+        # 固定到 v3 的具体 commit: 该 action 持有 contents:write, 不用可变标签
+        uses: softprops/action-gh-release@5113cdc90fd4d541c801c55356214017bf5ae34b # v3
         with:
           tag_name: ${{ steps.package.outputs.tag_name }}
           name: Ubuntu ${{ env.UBUNTU_RELEASE }} - gaokun3 - ${{ steps.package.outputs.kernel_release }}
