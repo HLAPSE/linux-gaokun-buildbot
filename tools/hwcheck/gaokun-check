@@ -12,9 +12,11 @@ info() { printf '         %s\n' "$*"; }
 hdr()  { printf '\n== %s ==\n' "$*"; }
 have() { command -v "$1" >/dev/null 2>&1; }
 
-# dmesg 普通用户可能被限制（dmesg_restrict），提前探测
+# dmesg 普通用户可能被限制（dmesg_restrict），提前探测权限。
+# 不能用 "dmesg | head -c1 | grep" 之类管道探测: dmesg 输出超过管道缓冲(~64KB)时
+# head 提前退出触发 SIGPIPE, set -o pipefail 下整条管道非零, root 也会被误判成无权限
 DMESG_OK=1
-dmesg 2>/dev/null | head -c 1 | grep -q . || DMESG_OK=0
+dmesg >/dev/null 2>&1 || DMESG_OK=0
 kdg()  { [[ $DMESG_OK -eq 1 ]] && dmesg 2>/dev/null | grep -i "$1"; }
 
 echo "gaokun3 (MateBook E Go) 硬件自检  $(date '+%F %T')"

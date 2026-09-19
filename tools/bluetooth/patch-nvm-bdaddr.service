@@ -4,11 +4,16 @@ DefaultDependencies=no
 After=local-fs.target
 Before=bluetooth.service
 ConditionPathExists=/usr/local/bin/patch-nvm-bdaddr.py
-ConditionPathExists=/lib/firmware/qca/wcnhpnv21g.bin
+# 通配两种 NVM 命名: wcnhpnv21g.bin 与 hpnv21g.*(与 patch-nvm-bdaddr.py 的 NVM_PATTERNS 对齐,
+# 固件包改布局时服务不再静默失效)
+ConditionPathExists=/lib/firmware/qca/*hpnv21g*
 
 [Service]
 Type=oneshot
 ExecStart=/usr/local/bin/patch-nvm-bdaddr.py
+# NVM 补丁写的是磁盘文件, 而 btuart 探测时已把旧固件载入控制器 —— 补丁后重载 HCI 驱动,
+# 让新地址当次开机即生效(失败则退回原行为: 第二次开机生效)
+ExecStartPost=/bin/sh -c 'modprobe -r btqca btusb hci_uart 2>/dev/null; modprobe hci_uart 2>/dev/null || true; modprobe btusb 2>/dev/null || true; exit 0'
 
 [Install]
 WantedBy=multi-user.target

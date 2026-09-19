@@ -33,7 +33,20 @@ fi
 
 # 文件系统层扩容(已到最大尺寸时为幂等 no-op)
 case "$fstype" in
-    ext4)  resize2fs "$root_dev" || true ;;
-    btrfs) btrfs filesystem resize max / || true ;;
+    ext4)
+        if resize2fs "$root_dev" 2>&1; then
+            echo "gaokun-grow-rootfs: resize2fs OK"
+        else
+            # 常见原因: 文件系统脏需要先离线 e2fsck -f。打到 journal 里, 不静默
+            echo "gaokun-grow-rootfs: WARNING: resize2fs 失败, 本次跳过(下次开机重试)" >&2
+        fi
+        ;;
+    btrfs)
+        if btrfs filesystem resize max / 2>&1; then
+            echo "gaokun-grow-rootfs: btrfs resize OK"
+        else
+            echo "gaokun-grow-rootfs: WARNING: btrfs resize 失败(可能已到最大尺寸), 本次跳过" >&2
+        fi
+        ;;
     *) echo "gaokun-grow-rootfs: 不支持的文件系统 $fstype，跳过" ;;
 esac

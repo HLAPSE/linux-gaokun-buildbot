@@ -67,7 +67,9 @@ ensure_source_tree() {
         return 0
     fi
 
-    read -r -p "gaokun3_defconfig not found in kernel directory. Pull kernel and apply patches? [y/N] [default: N]: " response
+    echo "警告: 本地内核目录 $KERN_SRC 缺少 gaokun3_defconfig。"
+    echo "      若继续, 整个目录将被删除并重新克隆, 其中未提交/未推送的本地改动将永久丢失!"
+    read -r -p "Delete $KERN_SRC, re-clone kernel and apply patches? [y/N] [default: N]: " response
     response="${response:-N}"
     if [[ ! "$response" =~ ^([yY][eE][sS]|[yY])$ ]]; then
         echo "Exiting."
@@ -95,10 +97,17 @@ ensure_source_tree() {
     configure_git_identity
 
     echo "Applying standard gaokun3 patches..."
-    git -C "$KERN_SRC" am "$GAOKUN_DIR"/patches/upstream/*.patch
-    git -C "$KERN_SRC" am "$GAOKUN_DIR"/patches/others/*.patch
-    git -C "$KERN_SRC" am "$GAOKUN_DIR"/patches/media/*.patch
-    git -C "$KERN_SRC" am "$GAOKUN_DIR"/patches/0099-arm64-gaokun3-import-local-dts-and-defconfig.patch
+    local series
+    for series in "$GAOKUN_DIR"/patches/upstream/*.patch \
+                  "$GAOKUN_DIR"/patches/others/*.patch \
+                  "$GAOKUN_DIR"/patches/media/*.patch \
+                  "$GAOKUN_DIR"/patches/0099-arm64-gaokun3-import-local-dts-and-defconfig.patch; do
+        if ! git -C "$KERN_SRC" am "$series"; then
+            git -C "$KERN_SRC" am --abort 2>/dev/null || true
+            echo "ERROR: 补丁应用失败: $series (am 状态已回滚, 源码树保持在补丁前状态)" >&2
+            return 1
+        fi
+    done
 }
 
 el2_state() {
@@ -131,6 +140,9 @@ copy_fw /lib/firmware/qcom/sc8280xp/HUAWEI/gaokun3/qcadsp8280.mbn
 copy_fw /lib/firmware/qcom/sc8280xp/HUAWEI/gaokun3/qccdsp8280.mbn
 copy_fw /lib/firmware/qcom/sc8280xp/HUAWEI/gaokun3/qcslpi8280.mbn
 copy_fw /lib/firmware/qcom/sc8280xp/HUAWEI/gaokun3/audioreach-tplg.bin
+# GPU 固件: initramfs 阶段没有它, msm 探测早期会报 "failed to load a660_sqe.fw"
+copy_fw /lib/firmware/qcom/a660_sqe.fw
+copy_fw /lib/firmware/qcom/a660_gmu.bin
 EOF
     sudo chmod 0755 /etc/initramfs-tools/hooks/gaokun3-firmware
 }
@@ -282,22 +294,28 @@ build_kernel() {
         printf 'qcom/%s\n' "$dtb_name" | sudo tee /etc/kernel/devicetree >/dev/null
     fi
 
-    if [[ "$DISTRO" == "ubuntu" ]]; then
-        ensure_ubuntu_initramfs_firmware_hook
-        sudo update-initramfs -c -k "$krel"
-    else
-        sudo dracut --force --kver "$krel"
-    fi
-
-    echo "kernel-install inputs:"
-    echo "  kernel release: $krel"
-    echo "  kernel image:   /boot/vmlinuz-$krel"
-    echo "  initrd:         /boot/$initrd_src"
-    echo "  devicetree:     qcom/$dtb_name"
-    echo "  dtb source:     $dtb_inst_dir/$dtb_name"
-
+    # initramfs 生成放进与 kernel-install 同一个保护块: /etc/kernel 已被临时改写,
+    # 此段任何一步失败都必须走统一的恢复分支, 不能让 set -e 在中途直接退出
     {
-        sudo kernel-install --entry-token=machine-id remove "$krel" >/dev/null 2>&1 || true
+        if [[ "$DISTRO" == "ubuntu" ]]; then
+            ensure_ubuntu_initramfs_firmware_hook
+            if sudo test -e "/boot/initrd.img-$krel"; then
+                # 同 krel 重复安装(调参重编)时 initrd 已存在, -c 会直接报错, 需用 -u 刷新
+                sudo update-initramfs -u -k "$krel"
+            else
+                sudo update-initramfs -c -k "$krel"
+            fi
+        else
+            sudo dracut --force --kver "$krel"
+        fi
+
+        echo "kernel-install inputs:"
+        echo "  kernel release: $krel"
+        echo "  kernel image:   /boot/vmlinuz-$krel"
+        echo "  initrd:         /boot/$initrd_src"
+        echo "  devicetree:     qcom/$dtb_name"
+        echo "  dtb source:     $dtb_inst_dir/$dtb_name"
+
         if [[ "$DISTRO" == "fedora" ]]; then
             sudo env KERNEL_INSTALL_CONF_ROOT="$conf_root" \
                 kernel-install --verbose --make-entry-directory=yes --entry-token=machine-id add \
@@ -307,6 +325,8 @@ build_kernel() {
                 kernel-install --verbose --make-entry-directory=yes --entry-token=machine-id add \
                 "$krel" "/boot/vmlinuz-$krel" "/boot/$initrd_src"
         fi
+        # 注意: 不先 remove 再 add —— kernel-install add 对既有条目是幂等覆盖,
+        # 预先 remove 会让 "add 失败" 变成 "该内核启动项彻底消失, 设备无法启动"
     } || {
         if [[ "$restore_kernel_conf" -eq 1 ]]; then
             for name in install.conf cmdline devicetree; do

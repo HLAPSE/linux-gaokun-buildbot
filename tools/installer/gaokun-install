@@ -21,9 +21,11 @@ if [[ ! -f "$src_removable" || "$(cat "$src_removable" 2>/dev/null)" != "1" ]]; 
     die "当前系统不在可移动介质(U盘)上。本安装器仅用于 U 盘 Live 环境整盘克隆"
 fi
 src_partno="$(lsblk -dn -o PARTN "$root_dev")"
+[[ "$src_partno" =~ ^[0-9]+$ ]] || die "无法解析根设备分区号(根设备: $root_dev)"
 
-# ---------------- 候选目标盘: 非源盘、非可移动的物理磁盘 ----------------
+# ---------------- 候选目标盘: 非源盘、非可移动、非 USB 总线的物理磁盘 ----------------
 targets=()
+usb_disks=()
 for d in /sys/class/block/*/; do
     name="$(basename "$d")"
     [[ -b "/dev/$name" ]] || continue
@@ -31,11 +33,22 @@ for d in /sys/class/block/*/; do
     [[ "$(lsblk -dn -o TYPE "/dev/$name" 2>/dev/null)" == "disk" ]] || continue
     [[ "/dev/$name" == "$src_disk" ]] && continue
     [[ "$(cat "$d/removable" 2>/dev/null || echo 1)" == "1" ]] && continue
+    # USB 外置盘(UAS/SATA 桥)普遍上报 removable=0, 用总线类型二次过滤,
+    # 避免把接着的 USB 硬盘/备份盘当成内置盘整盘清空
+    if [[ "$(lsblk -dn -o TRAN "/dev/$name" 2>/dev/null)" == "usb" ]]; then
+        usb_disks+=("/dev/$name")
+        continue
+    fi
     targets+=("/dev/$name")
 done
 
 case ${#targets[@]} in
-    0) die "未发现内置硬盘目标(仅检测到可移动介质)" ;;
+    0)
+        if [[ ${#usb_disks[@]} -gt 0 ]]; then
+            die "未发现内置硬盘目标(USB 外置盘 ${usb_disks[*]} 已按内置盘排除, 请勿用作安装目标)"
+        fi
+        die "未发现内置硬盘目标(仅检测到可移动介质)"
+        ;;
     1) tgt_disk="${targets[0]}" ;;
     *)
         say "检测到多块内置硬盘:"
@@ -45,6 +58,19 @@ case ${#targets[@]} in
         done
         ;;
 esac
+
+# ---------------- 安全校验: 目标盘分区不能处于挂载/使用状态 ----------------
+# Live 会话里点开过目标盘分区(udisks2 自动挂载)会静默保持挂载, 此时 dd 覆盖仍在
+# 回写的文件系统会克隆出损坏的系统, 必须先中止
+while read -r part; do
+    if findmnt -rn -S "$part" >/dev/null 2>&1; then
+        tgt_mnt="$(findmnt -rn -S "$part" -o TARGET)"
+        die "目标盘分区 $part 当前已挂载在 $tgt_mnt, 请先卸载(或弹出后重插不点开)再运行安装器"
+    fi
+    if swapon --show=NAME --noheadings 2>/dev/null | grep -qxF "$part"; then
+        die "目标盘分区 $part 正被用作 swap, 请先 swapoff 后重试"
+    fi
+done < <(lsblk -rno NAME,TYPE "$tgt_disk" 2>/dev/null | awk '$2=="part"{print "/dev/"$1}')
 
 # ---------------- 汇总与确认 ----------------
 tgt_size=$(blockdev --getsize64 "$tgt_disk")
@@ -74,15 +100,31 @@ read -rp "确认继续请输入 YES: " ans
 [[ "$ans" == "YES" ]] || die "已取消"
 
 # ---------------- 整盘克隆（截断到镜像数据末尾） ----------------
+# 克隆的是"正在运行"的系统, 不冻结源根文件系统的话 journald 等仍在写入:
+# ext4 还能靠事后 e2fsck 兜底, btrfs 则可能克隆出撕裂的元数据树(无法离线修复)。
+# fsfreeze 会阻塞写入但允许读取, dd 期间系统只是"暂停落盘", 解冻后一切照常。
+command -v fsfreeze >/dev/null 2>&1 || die "缺少 fsfreeze(util-linux), 无法保证克隆一致性"
+fsfreeze -f / 2>/dev/null || die "冻结源根文件系统失败, 为避免克隆出损坏的系统已中止"
+frozen=1
+trap '(( ${frozen:-0} )) && fsfreeze -u / 2>/dev/null; trap - EXIT' EXIT
+
 say "开始克隆镜像前 ${copy_mib}MiB, 请耐心等待..."
 dd if="$src_disk" of="$tgt_disk" bs=1M count="$copy_mib" status=progress conv=fsync
 sync
+fsfreeze -u /
+frozen=0
+trap - EXIT
 
 # ---------------- 分区与文件系统扩容(离线) ----------------
 say "扩容目标盘分区与文件系统..."
 blockdev --rereadpt "$tgt_disk" 2>/dev/null || partprobe "$tgt_disk" 2>/dev/null || true
 # growpart 内部经 sfdisk 重写分区表, GPT 备份头会一并归位到磁盘末尾
-growpart "$tgt_disk" "$src_partno" || true
+growpart_rc=0
+growpart "$tgt_disk" "$src_partno" 2>&1 | sed 's/^/  /' || growpart_rc=$?
+if (( growpart_rc != 0 )); then
+    echo "  警告: 分区扩容未完成(rc=$growpart_rc, 可能是目标盘无剩余空间或缺少 growpart),"
+    echo "        首次启动时由 gaokun-grow-rootfs.service 重试"
+fi
 blockdev --rereadpt "$tgt_disk" 2>/dev/null || partprobe "$tgt_disk" 2>/dev/null || true
 
 case "$tgt_disk" in
@@ -98,26 +140,102 @@ case "$fstype" in
         fsck_rc=0; e2fsck -fy "$root_part" || fsck_rc=$?
         (( fsck_rc <= 2 )) || die "e2fsck 修复失败(rc=$fsck_rc)"
         resize2fs "$root_part"
+        # 换随机 UUID: 否则 U 盘和内置盘同 UUID, 忘拔 U 盘时 initramfs 可能挂错根
+        old_uuid="$(blkid -o value -s UUID "$root_part")"
+        new_uuid="$(cat /proc/sys/kernel/random/uuid)"
+        tune2fs -U "$new_uuid" "$root_part"
         ;;
     btrfs)
         mnt="$(mktemp -d)"
         mount "$root_part" "$mnt"
         btrfs filesystem resize max "$mnt"
         umount "$mnt"; rmdir "$mnt"
+        # btrfs 不做 UUID 变更(btrfstune 风险高), 完成提示里会强调拔 U 盘
+        old_uuid="$(blkid -o value -s UUID "$root_part")"
+        new_uuid="$old_uuid"
         ;;
     *)
         echo "文件系统 $fstype 不支持离线扩容, 首次启动时由 gaokun-grow-rootfs.service 处理"
+        old_uuid="$(blkid -o value -s UUID "$root_part")"
+        new_uuid="$old_uuid"
         ;;
 esac
 sync
 
+# ---------------- 系统身份规范化: machine-id 与启动条目 ----------------
+# 克隆出的系统沿用 Live 会话的 machine-id, 且 ESP 上会带着历史装机残留的旧条目
+# (旧 machine-id 的条目引用的内核文件早已不存在, default 还可能选中它们)。
+# 这里给新系统分配全新 machine-id, ext4 一并换随机 UUID, 并把 ESP 启动条目
+# 收敛为唯一一套, 从根源上避免"多次装机后启动菜单越攒越乱"的问题。
+say "规范化 machine-id 与 systemd-boot 启动条目..."
+case "$tgt_disk" in
+    *[0-9]) esp_part="${tgt_disk}p1" ;;
+    *)      esp_part="${tgt_disk}1"   ;;
+esac
+new_mid="$(cat /proc/sys/kernel/random/uuid | tr -d -)"
+
+root_mnt="$(mktemp -d)"
+btrfs_opts=()
+[[ "$fstype" == "btrfs" ]] && btrfs_opts=(-o subvol=@)
+mount "${btrfs_opts[@]}" "$root_part" "$root_mnt" || die "挂载目标根分区 $root_part 失败"
+
+old_mid="$(cat "$root_mnt/etc/machine-id" 2>/dev/null || true)"
+printf '%s\n' "$new_mid" > "$root_mnt/etc/machine-id"
+if [[ -d "$root_mnt/var/lib/dbus" ]]; then
+    printf '%s\n' "$new_mid" > "$root_mnt/var/lib/dbus/machine-id"
+fi
+if [[ -n "$old_uuid" && "$new_uuid" != "$old_uuid" ]]; then
+    sed -i "s/$old_uuid/$new_uuid/g" "$root_mnt/etc/fstab" "$root_mnt/etc/kernel/cmdline" 2>/dev/null || true
+fi
+
+esp_mnt="$(mktemp -d)"
+mount "$esp_part" "$esp_mnt" || die "挂载目标 ESP $esp_part 失败"
+entries="$esp_mnt/loader/entries"
+if [[ -d "$entries" && "$old_mid" =~ ^[0-9a-f]{32}$ ]]; then
+    # 当前克隆的条目迁移到新 machine-id 名下; 其它 machine-id 的条目(历史装机残留)一律清除
+    for conf in "$entries"/*.conf; do
+        [[ -e "$conf" ]] || continue
+        conf_mid="$(awk '$1=="machine-id"{print $2}' "$conf")"
+        if [[ "$conf_mid" != "$old_mid" ]]; then
+            rm -f "$conf"
+            continue
+        fi
+        conf_sed="s/^machine-id .*/machine-id $new_mid/; s|/$old_mid/|/$new_mid/|g"
+        if [[ -n "$old_uuid" && "$new_uuid" != "$old_uuid" ]]; then
+            conf_sed="$conf_sed; s/$old_uuid/$new_uuid/g"
+        fi
+        sed -i "$conf_sed" "$conf"
+        mv "$conf" "$entries/$(basename "${conf/$old_mid/$new_mid}")"
+    done
+    if [[ -d "$esp_mnt/$old_mid" ]]; then
+        if [[ -e "$esp_mnt/$new_mid" ]]; then
+            cp -a "$esp_mnt/$old_mid/." "$esp_mnt/$new_mid/"
+            rm -rf "$esp_mnt/$old_mid"
+        else
+            mv "$esp_mnt/$old_mid" "$esp_mnt/$new_mid"
+        fi
+    fi
+    # 清理不再被任何条目引用的旧 <machine-id> 内核目录
+    for d in "$esp_mnt"/*/; do
+        mid="$(basename "$d")"
+        [[ "$mid" =~ ^[0-9a-f]{32}$ ]] || continue
+        grep -rqs "/$mid/" "$entries" || rm -rf "$d"
+    done
+fi
+umount "$esp_mnt"; rmdir "$esp_mnt"
+umount "$root_mnt"; rmdir "$root_mnt"
+sync
+
 # ---------------- 完成 ----------------
-say "安装完成! rootfs 已扩容至 $(lsblk -dn -o SIZE "$root_part")"
+say "安装完成! rootfs 当前大小: $(lsblk -dn -o SIZE "$root_part")"
 echo
 echo "  下一步:"
-echo "  1. 关机后拔掉 U 盘(两盘 UUID 完全相同, 不拔可能从 U 盘启动/挂错分区)"
-echo "  2. 按电源键开机, 直接进入内置硬盘上的系统"
-echo "  3. 首次进入后建议: 改密码 / 关自动登录 / 跑一遍 gaokun-check"
+if [[ "$new_uuid" != "$old_uuid" ]]; then
+    echo "  1. 关机后拔掉 U 盘, 按电源键开机(系统 UUID/machine-id 已重新生成, 与 U 盘不再冲突)"
+else
+    echo "  1. 关机后拔掉 U 盘(两盘 UUID 相同, 不拔可能从 U 盘启动/挂错分区)"
+fi
+echo "  2. 首次进入后建议: 改密码 / 关自动登录 / 跑一遍 gaokun-check (ssh 默认未启用, 需要远程登录时: sudo systemctl enable --now ssh)"
 echo
 read -rp "按回车键关机(Ctrl+C 留在 Live 环境): "
 poweroff

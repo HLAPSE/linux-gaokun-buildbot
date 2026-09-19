@@ -79,7 +79,7 @@ def iter_nvm_files():
 
     for pattern in NVM_PATTERNS:
         for path in sorted(FIRMWARE_DIR.glob(pattern)):
-            if not path.is_file() or path.name.endswith(".orig"):
+            if not path.is_file() or path.name.endswith((".orig", ".patch-tmp")):
                 continue
             if path in seen:
                 continue
@@ -103,7 +103,19 @@ def patch_file(path, desired_addr):
         shutil.copy2(path, backup)
 
     data[offset:offset + BD_ADDR_LEN] = desired_fw_addr
-    path.write_bytes(data)
+    # 原子替换: 先写临时文件并 fsync, 再 rename。原地 write_bytes 写一半掉电
+    # 会得到损坏的 NVM(蓝牙固件加载失败), 只能靠手工还原 .orig
+    tmp = path.with_name(path.name + ".patch-tmp")
+    try:
+        with open(tmp, "wb") as f:
+            f.write(data)
+            f.flush()
+            os.fsync(f.fileno())
+        os.replace(tmp, path)
+    except OSError:
+        tmp.unlink(missing_ok=True)
+        raise
+    print(f"Patched BDADDR in {path}")
     return True
 
 
