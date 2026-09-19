@@ -164,8 +164,9 @@ ln -sf /usr/share/zoneinfo/Asia/Shanghai /etc/localtime
 cat > /etc/dracut.conf.d/matebook.conf <<'MODEOF'
 hostonly="no"
 add_drivers+=" btrfs nvme phy-qcom-qmp-pcie phy-qcom-qmp-combo phy-qcom-qmp-usb phy-qcom-snps-femto-v2 usb-storage uas typec pci-pwrctrl-pwrseq ath11k ath11k_pci i2c-hid-of "
-# GPU 固件进 initramfs: 否则 msm 探测早期报 a660_sqe.fw 加载失败(rootfs 尚未就绪的竞态)
-install_items+=" /lib/firmware/qcom/a660_sqe.fw /lib/firmware/qcom/a660_gmu.bin "
+# GPU 固件进 initramfs: 否则 msm 探测早期报 a660_sqe.fw 加载失败(rootfs 尚未就绪的竞态);
+# zap shader 缺失同样让 gpu hw init failed(-2), GPU 整个会话无加速
+install_items+=" /lib/firmware/qcom/a660_sqe.fw /lib/firmware/qcom/a660_gmu.bin /lib/firmware/qcom/sc8280xp/HUAWEI/gaokun3/qcdxkmsuc8280.mbn "
 MODEOF
 
 install -d /etc/kernel

@@ -11,6 +11,9 @@ copy_fw /lib/firmware/qcom/sc8280xp/HUAWEI/gaokun3/qcadsp8280.mbn
 copy_fw /lib/firmware/qcom/sc8280xp/HUAWEI/gaokun3/qccdsp8280.mbn
 copy_fw /lib/firmware/qcom/sc8280xp/HUAWEI/gaokun3/qcslpi8280.mbn
 copy_fw /lib/firmware/qcom/sc8280xp/HUAWEI/gaokun3/audioreach-tplg.bin
-# GPU 固件: initramfs 阶段没有它, msm 探测早期会报 "failed to load a660_sqe.fw"
+# GPU 固件: initramfs 阶段没有它们, msm 探测早期(rootfs 尚未挂载)会先报
+# "failed to load a660_sqe.fw"; 只补 sqe/gmu 不够, zap shader 加载失败同样
+# 让 gpu hw init failed(-2), GPU 整个会话无加速
 copy_fw /lib/firmware/qcom/a660_sqe.fw
 copy_fw /lib/firmware/qcom/a660_gmu.bin
+copy_fw /lib/firmware/qcom/sc8280xp/HUAWEI/gaokun3/qcdxkmsuc8280.mbn
