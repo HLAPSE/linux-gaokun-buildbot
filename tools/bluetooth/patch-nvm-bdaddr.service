@@ -5,8 +5,9 @@ After=local-fs.target
 Before=bluetooth.service
 ConditionPathExists=/usr/local/bin/patch-nvm-bdaddr.py
 # 通配两种 NVM 命名: wcnhpnv21g.bin 与 hpnv21g.*(与 patch-nvm-bdaddr.py 的 NVM_PATTERNS 对齐,
-# 固件包改布局时服务不再静默失效)
-ConditionPathExists=/lib/firmware/qca/*hpnv21g*
+# 固件包改布局时服务不再静默失效)。注意必须用 ConditionPathExistsGlob=:
+# ConditionPathExists= 只做字面路径判断、不展开通配符, 写在那里条件恒假、服务静默失效
+ConditionPathExistsGlob=/lib/firmware/qca/*hpnv21g*
 
 [Service]
 Type=oneshot
